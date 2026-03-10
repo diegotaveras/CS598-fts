@@ -1,6 +1,6 @@
-fastapi
-uvicorn[standard]
-httpx
+grpcio
+grpcio-tools
+protobuf
 pydantic
 aiofiles
 orjson
