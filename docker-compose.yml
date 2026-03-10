@@ -1,0 +1,51 @@
+version: "3"
+
+services:
+
+  node1:
+    build: .
+    container_name: node1
+    volumes:
+      - .:/app
+    ports:
+      - "8001:8000"
+    environment:
+      PORT: 8000
+      NODE_ID: 1
+      PEERS: node1:8000,node2:8000,node3:8000,node4:8000
+
+  node2:
+    build: .
+    container_name: node2
+    volumes:
+      - .:/app
+    ports:
+      - "8002:8000"
+    environment:
+      PORT: 8000
+      NODE_ID: 2
+      PEERS: node1:8000,node2:8000,node3:8000,node4:8000
+
+  node3:
+    build: .
+    container_name: node3
+    volumes:
+      - .:/app
+    ports:
+      - "8003:8000"
+    environment:
+      PORT: 8000  
+      NODE_ID: 3
+      PEERS: node1:8000,node2:8000,node3:8000,node4:8000
+
+  node4:
+    build: .
+    container_name: node4
+    volumes:
+      - .:/app
+    ports:
+      - "8004:8000"
+    environment:
+      PORT: 8000
+      NODE_ID: 4
+      PEERS: node1:8000,node2:8000,node3:8000,node4:8000
