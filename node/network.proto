@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package network;
+
+service NetworkService {
+  rpc Ping(PingRequest) returns (PingReply);
+  rpc SendMessage(MessageRequest) returns (MessageReply);
+}
+
+message PingRequest {
+  string sender = 1;
+}
+
+message PingReply {
+  string node_id = 1;
+  string status = 2;
+}
+
+message MessageRequest {
+  string sender = 1;
+  string msg = 2;
+}
+
+message MessageReply {
+  string status = 1;
+}
