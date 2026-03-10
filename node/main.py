@@ -3,7 +3,7 @@ import asyncio
 import grpc
 import network_pb2
 import network_pb2_grpc
-
+from grpc_reflection.v1alpha import reflection
 
 NODE_ID = os.getenv("NODE_ID", "node")
 HOST = os.getenv("HOST", "0.0.0.0")
@@ -88,6 +88,12 @@ async def serve():
     server = grpc.aio.server()
     network_pb2_grpc.add_NetworkServiceServicer_to_server(NetworkServicer(), server)
 
+    SERVICE_NAMES = (
+        network_pb2.DESCRIPTOR.services_by_name["NetworkService"].full_name,
+        reflection.SERVICE_NAME,
+    )
+
+    reflection.enable_server_reflection(SERVICE_NAMES, server)
     listen_addr = f"{HOST}:{PORT}"
     server.add_insecure_port(listen_addr)
 
