@@ -10,10 +10,10 @@ NODE_ID = os.getenv("NODE_ID", "node")
 AGENT_SOCKET_PATH = os.getenv("AGENT_SOCKET_PATH", "/tmp/agent.sock")
 
 class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
-    def __init__(self, node_id: str):
+    def __init__(self, node_id: str, agent_state):
         self.node_id = str(node_id)
         self.ready = True
-        self.agent_state = {}
+        self.agent_state = agent_state
 
     async def HealthCheck(self, request, context):
         return agent_pb2.HealthReply(
@@ -38,7 +38,7 @@ class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
 
 def agent_setup():
     print(f"[{NODE_ID}]: Setting up agent")
-    # here we can actually load model and tools
+    # here we can actually load model and tools, return an agentstate for inference through the agent servicer
     pass
 
 
@@ -51,7 +51,7 @@ async def serve():
         os.remove(AGENT_SOCKET_PATH)
 
     server = grpc.aio.server()
-    servicer = AgentServicer(NODE_ID)
+    servicer = AgentServicer(NODE_ID, agent_state)
 
     agent_pb2_grpc.add_AgentServiceServicer_to_server(servicer, server)
 
