@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package agent;
+
+service AgentService {
+  rpc HealthCheck(HealthRequest) returns (HealthReply);
+  rpc RunTask(TaskRequest) returns (TaskReply);
+}
+
+message HealthRequest {}
+
+message HealthReply {
+  string node_id = 1;
+  string status = 2;
+}
+
+message TaskRequest {
+  string task_id = 1;
+  string payload = 2;
+}
+
+message TaskReply {
+  string task_id = 1;
+  string status = 2;
+  string result = 3;
+}

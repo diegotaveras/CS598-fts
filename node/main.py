@@ -11,6 +11,7 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 PEERS = os.getenv("PEERS", "").split(",") if os.getenv("PEERS") else []
 SELF_ADDR = os.getenv("SELF_ADDR", f"node{NODE_ID}:{PORT}")
+AGENT_SOCKET_PATH = os.getenv("AGENT_SOCKET_PATH", "/tmp/agent.sock")
 
 class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
     async def Ping(self, request, context):
@@ -44,9 +45,14 @@ async def serve():
     await server.start()
     print(f"[{NODE_ID}] gRPC server started", flush=True)
 
-    # background runtime tasks, here we can start the agent process too
-    asyncio.create_task(node.handshake_loop())
+    # connect to agent socket
+    node.connect_agent(f"unix://{AGENT_SOCKET_PATH}", "local_agent")
+    agent_ready = await node.agent_health_check("local_agent")
+    if not agent_ready:
+        print(f"[{NODE_ID}] proceeding without ready agent", flush=True)
 
+    # run networking handshake
+    asyncio.create_task(node.handshake_loop())
 
     await server.wait_for_termination()
 
