@@ -17,6 +17,25 @@ class Node:
     def connect_agent(self, socket, agent_id="local_agent"):
         self.agent_manager.connect_agent(socket, agent_id)
         
+    async def process_prompt(self, prompt, sender):
+        try:
+            agent_reply = await self.agent_manager.run_task(
+                agent_id="local_agent",
+                task_id=f"{sender}-to-{self.node_id}",
+                payload=prompt,
+            )
+
+            agent_result = agent_reply.result if agent_reply is not None else "agent failed"
+            print(
+                f"[{self.node_id}] local agent processed message from {sender}: {agent_result}",
+                flush=True,
+            )
+        except Exception as e:
+            print(
+                f"[{self.node_id}] failed to forward message to local agent: {e}",
+                flush=True,
+            )
+
     async def handshake_loop(self):
         await asyncio.sleep(2)
 
@@ -25,13 +44,36 @@ class Node:
             for attempt in range(5):
                 ok = await self.peer_manager.ping_peer(peer, timeout=2.0)
                 if ok:
-                    await self.peer_manager.send_message(peer, "hello from networking setup")
                     break
 
                 await asyncio.sleep(1.0)
 
             if not ok:
-                print(f"[{self.NODE_ID}] could not establish contact with {peer}", flush=True)
+                print(f"[{self.node_id}] could not establish contact with {peer}", flush=True)
+
+    async def multicast_prompt(self, prompt):
+        results = {}
+
+        # send to local agent
+        asyncio.create_task(self.process_prompt(prompt))
+
+        # multicast to peers
+        send_tasks = [
+            self.peer_manager.send_message(peer, prompt)
+            for peer in self.peer_manager.peers
+        ]
+
+        send_results = await asyncio.gather(*send_tasks, return_exceptions=True)
+
+        for peer, result in zip(self.peer_manager.peers, send_results):
+            if isinstance(result, Exception):
+                print(f"[{self.node_id}] failed to multicast to {peer}: {result}", flush=True)
+                results[peer] = False
+            else:
+                results[peer] = result
+
+        return results
+
 
     async def agent_health_check(self, agent_id="local_agent", retries=10, delay=1.0):
         for attempt in range(retries):

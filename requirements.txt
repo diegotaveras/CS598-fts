@@ -49,3 +49,4 @@ urllib3==2.6.3
 uv==0.10.9
 wcwidth==0.6.0
 yarl==1.23.0
+httpx
