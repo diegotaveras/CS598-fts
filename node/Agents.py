@@ -29,7 +29,7 @@ class AgentManager:
             print(f"[agent-manager] health check failed for {agent_id}: {e}", flush=True)
             return False
 
-    async def run_task(self, agent_id, task_id, payload, timeout=10.0):
+    async def run_task(self, agent_id, task_id, payload, timeout=30.0):
         try:
             reply = await self.stubs[agent_id].RunTask(
                 agent_pb2.TaskRequest(task_id=task_id, payload=payload),

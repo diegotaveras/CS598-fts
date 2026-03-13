@@ -14,12 +14,38 @@ SELF_ADDR = os.getenv("SELF_ADDR", f"node{NODE_ID}:{PORT}")
 AGENT_SOCKET_PATH = os.getenv("AGENT_SOCKET_PATH", "/tmp/agent.sock")
 
 class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
+    def __init__(self, node):
+        self.node = node
     async def Ping(self, request, context):
         print(f"[{NODE_ID}] got ping from {request.sender}", flush=True)
         return network_pb2.PingReply(node_id=str(NODE_ID), status="alive")
 
+    async def _forward_to_local_agent(self, sender, msg):
+        try:
+            agent_reply = await self.node.agent_manager.run_task(
+                agent_id="local_agent",
+                task_id=f"{sender}-to-{self.node.node_id}",
+                payload=msg,
+            )
+
+            agent_result = agent_reply.result if agent_reply is not None else "agent failed"
+            print(
+                f"[{self.node.node_id}] local agent processed message from {sender}: {agent_result}",
+                flush=True,
+            )
+        except Exception as e:
+            print(
+                f"[{self.node.node_id}] failed to forward message to local agent: {e}",
+                flush=True,
+            )
+
     async def SendMessage(self, request, context):
         print(f"[{NODE_ID}] received from {request.sender}: {request.msg}", flush=True)
+
+        asyncio.create_task(
+            self._forward_to_local_agent(request.sender, request.msg)
+        )
+
         return network_pb2.MessageReply(status="received")
 
 
@@ -27,7 +53,7 @@ node = Node.Node(NODE_ID, HOST, PORT, PEERS)
 
 async def serve():
     server = grpc.aio.server()
-    network_pb2_grpc.add_NetworkServiceServicer_to_server(NetworkServicer(), server)
+    network_pb2_grpc.add_NetworkServiceServicer_to_server(NetworkServicer(node), server)
 
     SERVICE_NAMES = (
         network_pb2.DESCRIPTOR.services_by_name["NetworkService"].full_name,
@@ -53,6 +79,11 @@ async def serve():
 
     # run networking handshake
     asyncio.create_task(node.handshake_loop())
+    
+    # testing a prompt multicast to all nodes (including itself)
+    if NODE_ID == "1":
+        asyncio.create_task(node.multicast_prompt(prompt="explain RAFT consensus protocol"))
+        
 
     await server.wait_for_termination()
 

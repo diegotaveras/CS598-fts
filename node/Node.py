@@ -25,13 +25,46 @@ class Node:
             for attempt in range(5):
                 ok = await self.peer_manager.ping_peer(peer, timeout=2.0)
                 if ok:
-                    await self.peer_manager.send_message(peer, "hello from networking setup")
                     break
 
                 await asyncio.sleep(1.0)
 
             if not ok:
                 print(f"[{self.NODE_ID}] could not establish contact with {peer}", flush=True)
+
+    async def multicast_prompt(self, prompt, agent_id="local_agent"):
+        results = {}
+
+        # send to local agent
+        try:
+            agent_reply = await self.agent_manager.run_task(
+                agent_id=agent_id,
+                task_id=f"{self.node_id}-prompt",
+                payload=prompt,
+            )
+            results["local_agent"] = agent_reply
+            print(agent_reply, flush=True)
+        except Exception as e:
+            print(f"[{self.node_id}] failed local agent prompt: {e}", flush=True)
+            results["local_agent"] = None
+
+        # multicast to peers
+        send_tasks = [
+            self.peer_manager.send_message(peer, prompt)
+            for peer in self.peer_manager.peers
+        ]
+
+        send_results = await asyncio.gather(*send_tasks, return_exceptions=True)
+
+        for peer, result in zip(self.peer_manager.peers, send_results):
+            if isinstance(result, Exception):
+                print(f"[{self.node_id}] failed to multicast to {peer}: {result}", flush=True)
+                results[peer] = False
+            else:
+                results[peer] = result
+
+        return results
+
 
     async def agent_health_check(self, agent_id="local_agent", retries=10, delay=1.0):
         for attempt in range(retries):
