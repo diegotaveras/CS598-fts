@@ -68,7 +68,7 @@ class InferenceClient:
     async def health_check(self, timeout=5.0):
         try:
             if self.state.backend == "sglang":
-                url = f"{self.state.base_url.rstrip('/')}/health"
+                url = f"{self.state.endpoint.rstrip('/')}/health"
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     response = await client.get(url)
                     response.raise_for_status()
