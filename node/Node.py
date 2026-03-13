@@ -17,6 +17,25 @@ class Node:
     def connect_agent(self, socket, agent_id="local_agent"):
         self.agent_manager.connect_agent(socket, agent_id)
         
+    async def process_prompt(self, prompt, sender):
+        try:
+            agent_reply = await self.agent_manager.run_task(
+                agent_id="local_agent",
+                task_id=f"{sender}-to-{self.node_id}",
+                payload=prompt,
+            )
+
+            agent_result = agent_reply.result if agent_reply is not None else "agent failed"
+            print(
+                f"[{self.node_id}] local agent processed message from {sender}: {agent_result}",
+                flush=True,
+            )
+        except Exception as e:
+            print(
+                f"[{self.node_id}] failed to forward message to local agent: {e}",
+                flush=True,
+            )
+
     async def handshake_loop(self):
         await asyncio.sleep(2)
 
@@ -30,23 +49,13 @@ class Node:
                 await asyncio.sleep(1.0)
 
             if not ok:
-                print(f"[{self.NODE_ID}] could not establish contact with {peer}", flush=True)
+                print(f"[{self.node_id}] could not establish contact with {peer}", flush=True)
 
-    async def multicast_prompt(self, prompt, agent_id="local_agent"):
+    async def multicast_prompt(self, prompt):
         results = {}
 
         # send to local agent
-        try:
-            agent_reply = await self.agent_manager.run_task(
-                agent_id=agent_id,
-                task_id=f"{self.node_id}-prompt",
-                payload=prompt,
-            )
-            results["local_agent"] = agent_reply
-            print(agent_reply, flush=True)
-        except Exception as e:
-            print(f"[{self.node_id}] failed local agent prompt: {e}", flush=True)
-            results["local_agent"] = None
+        asyncio.create_task(self.process_prompt(prompt))
 
         # multicast to peers
         send_tasks = [

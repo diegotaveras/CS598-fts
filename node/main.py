@@ -20,32 +20,13 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
         print(f"[{NODE_ID}] got ping from {request.sender}", flush=True)
         return network_pb2.PingReply(node_id=str(NODE_ID), status="alive")
 
-    async def _forward_to_local_agent(self, sender, msg):
-        try:
-            agent_reply = await self.node.agent_manager.run_task(
-                agent_id="local_agent",
-                task_id=f"{sender}-to-{self.node.node_id}",
-                payload=msg,
-            )
-
-            agent_result = agent_reply.result if agent_reply is not None else "agent failed"
-            print(
-                f"[{self.node.node_id}] local agent processed message from {sender}: {agent_result}",
-                flush=True,
-            )
-        except Exception as e:
-            print(
-                f"[{self.node.node_id}] failed to forward message to local agent: {e}",
-                flush=True,
-            )
-
     async def SendMessage(self, request, context):
         print(f"[{NODE_ID}] received from {request.sender}: {request.msg}", flush=True)
 
         asyncio.create_task(
-            self._forward_to_local_agent(request.sender, request.msg)
+            node.process_prompt(request.msg, request.sender)
         )
-
+        
         return network_pb2.MessageReply(status="received")
 
 
