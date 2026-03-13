@@ -4,6 +4,8 @@ services:
 
   node1:
     build: .
+    env_file:
+      - .env
     container_name: node1
     volumes:
       - .:/app
@@ -17,6 +19,8 @@ services:
 
   node2:
     build: .
+    env_file:
+      - .env
     container_name: node2
     volumes:
       - .:/app
@@ -30,6 +34,8 @@ services:
 
   node3:
     build: .
+    env_file:
+      - .env
     container_name: node3
     volumes:
       - .:/app
@@ -43,6 +49,8 @@ services:
 
   node4:
     build: .
+    env_file:
+      - .env
     container_name: node4
     volumes:
       - .:/app
