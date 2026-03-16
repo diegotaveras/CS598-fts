@@ -2,5 +2,5 @@
 set -e
 
 cd /app/node
-python agent.py &
+python agent_setup.py &
 exec python main.py
