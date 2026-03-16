@@ -22,9 +22,13 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
 
     async def SendMessage(self, request, context):
         print(f"[{NODE_ID}] received from {request.sender}: {request.msg}", flush=True)
+        prompt = request.msg
+        if False:
+            node.multicast_prompt(prompt)
+
 
         asyncio.create_task(
-            node.process_prompt(request.msg, request.sender)
+            node.process_prompt(prompt, request.sender)
         )
         
         return network_pb2.MessageReply(status="received")
@@ -39,7 +43,8 @@ async def node_loop(node):
     
     # testing a prompt multicast to all nodes (including itself)
     if node.node_id == "1":
-        asyncio.create_task(node.multicast_prompt(prompt="explain RAFT consensus protocol"))
+        pass
+        # asyncio.create_task(node.multicast_prompt(prompt="explain RAFT consensus protocol"))
     
 
 async def serve():
@@ -69,7 +74,7 @@ async def serve():
         print(f"[{NODE_ID}] proceeding without ready agent", flush=True)
 
     asyncio.create_task(node_loop(node))
-        
+
     await server.wait_for_termination()
 
 
