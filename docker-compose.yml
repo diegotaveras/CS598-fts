@@ -11,11 +11,16 @@ services:
       - .:/app
     ports:
       - "8001:8000"
+      - "9001:9000"
     environment:
-      AGENT_SOCKET_PATH: /tmp/agent.sock
       PORT: 8000
       NODE_ID: 1
-      PEERS: node1:8000,node2:8000,node3:8000,node4:8000
+      PEERS: node1:8000,node2:8000,node3:8000,node4:8000,node5:8000
+
+      CLIENT_ID: 1
+      CLIENT_PORT: 9000
+      PRIMARY: node2:8000
+      REPLICAS: node1:8000,node2:8000,node3:8000,node4:8000,node5:8000
 
   node2:
     build: .
@@ -30,7 +35,7 @@ services:
       AGENT_SOCKET_PATH: /tmp/agent.sock
       PORT: 8000
       NODE_ID: 2
-      PEERS: node1:8000,node2:8000,node3:8000,node4:8000
+      PEERS: node1:8000,node2:8000,node3:8000,node4:8000,node5:8000
 
   node3:
     build: .
@@ -43,9 +48,9 @@ services:
       - "8003:8000"
     environment:
       AGENT_SOCKET_PATH: /tmp/agent.sock
-      PORT: 8000  
+      PORT: 8000
       NODE_ID: 3
-      PEERS: node1:8000,node2:8000,node3:8000,node4:8000
+      PEERS: node1:8000,node2:8000,node3:8000,node4:8000,node5:8000
 
   node4:
     build: .
@@ -60,4 +65,19 @@ services:
       AGENT_SOCKET_PATH: /tmp/agent.sock
       PORT: 8000
       NODE_ID: 4
-      PEERS: node1:8000,node2:8000,node3:8000,node4:8000
+      PEERS: node1:8000,node2:8000,node3:8000,node4:8000,node5:8000
+
+  node5:
+    build: .
+    env_file:
+      - .env
+    container_name: node5
+    volumes:
+      - .:/app
+    ports:
+      - "8005:8000"
+    environment:
+      AGENT_SOCKET_PATH: /tmp/agent.sock
+      PORT: 8000
+      NODE_ID: 5
+      PEERS: node1:8000,node2:8000,node3:8000,node4:8000,node5:8000
