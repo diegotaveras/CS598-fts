@@ -20,16 +20,26 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
         print(f"[{NODE_ID}] got ping from {request.sender}", flush=True)
         return network_pb2.PingReply(node_id=str(NODE_ID), status="alive")
 
-    async def SendMessage(self, request, context):
-        print(f"[{NODE_ID}] received from {request.sender}: {request.msg}", flush=True)
-        prompt = request.msg
-        if False:
-            node.multicast_prompt(prompt)
+    async def HandleProtocolMessage(self, request, context):
 
+        if request.HasField("client_request"):
+            cr = request.client_request
+            print(
+                f"[{NODE_ID}] received client_request from {request.sender}: "
+                f"request_id={cr.request_id} client_id={cr.client_id} prompt={cr.prompt}",
+                flush=True,
+            )
+            asyncio.create_task(self.node.handle_client_request(cr))
+        elif request.HasField("ordered_request"):
+            # simple prompt processing (no multicast) if not a client_request
+            orq = request.ordered_request
+            print(
+                f"[{NODE_ID}] received ordered_request from {request.sender}: "
+                f"request_id={orq.request_id} seqno={orq.seqno}",
+                flush=True,
+            )
+            asyncio.create_task(self.node.handle_ordered_request(orq, request.sender))
 
-        asyncio.create_task(
-            node.process_prompt(prompt, request.sender)
-        )
         
         return network_pb2.MessageReply(status="received")
 

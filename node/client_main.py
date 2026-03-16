@@ -44,8 +44,17 @@ async def client_loop():
         f"[client {CLIENT_ID}] sending request to primary {PRIMARY}: {TEST_PROMPT}",
         flush=True,
     )
+
+    msg = network_pb2.ProtocolMessage(
+        sender=client.self_addr,
+        client_request=network_pb2.ClientRequest(
+            request_id="0",
+            client_id=str(CLIENT_ID),
+            prompt=TEST_PROMPT,
+        ),
+    )
     
-    ok = await client.send_request(PRIMARY, TEST_PROMPT)
+    ok = await client.send_request(PRIMARY, msg)
 
     if not ok:
         print(f"[client {CLIENT_ID}] failed to send request to primary", flush=True)

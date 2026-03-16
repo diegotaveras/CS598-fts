@@ -35,10 +35,7 @@ class PeerManager:
 
     async def send_message(self, peer, msg, timeout=3.0):
         try:
-            reply = await self.stubs[peer].SendMessage(
-                network_pb2.MessageRequest(sender=str(self.NODE_ID), msg=msg),
-                timeout=timeout,
-            )
+            reply = await self.stubs[peer].HandleProtocolMessage(msg, timeout=timeout)
             print(f"[{self.NODE_ID}] sent to {peer}: {reply.status}", flush=True)
             return True
         except Exception as e:
