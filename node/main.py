@@ -32,6 +32,16 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
 
 node = Node.Node(NODE_ID, HOST, PORT, PEERS)
 
+
+async def node_loop(node):
+    # run networking handshake
+    await node.handshake_loop()
+    
+    # testing a prompt multicast to all nodes (including itself)
+    if node.node_id == "1":
+        asyncio.create_task(node.multicast_prompt(prompt="explain RAFT consensus protocol"))
+    
+
 async def serve():
     server = grpc.aio.server()
     network_pb2_grpc.add_NetworkServiceServicer_to_server(NetworkServicer(node), server)
@@ -58,14 +68,8 @@ async def serve():
     if not agent_ready:
         print(f"[{NODE_ID}] proceeding without ready agent", flush=True)
 
-    # run networking handshake
-    asyncio.create_task(node.handshake_loop())
-    
-    # testing a prompt multicast to all nodes (including itself)
-    if NODE_ID == "1":
-        asyncio.create_task(node.multicast_prompt(prompt="explain RAFT consensus protocol"))
+    asyncio.create_task(node_loop(node))
         
-
     await server.wait_for_termination()
 
 

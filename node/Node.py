@@ -55,7 +55,7 @@ class Node:
         results = {}
 
         # send to local agent
-        asyncio.create_task(self.process_prompt(prompt))
+        asyncio.create_task(self.process_prompt(prompt, self.node_id))
 
         # multicast to peers
         send_tasks = [
