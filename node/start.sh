@@ -7,12 +7,11 @@ if [ "$RESET_LOGS" = "1" ]; then
   ./reset_logs.sh
 fi
 
-python agent_setup.py &
-python node_main.py &
+ROLE="${ROLE:-replica}"
 
-if [ "$CLIENT_ID" = "1" ]; then
-  sleep 3
+if [ "$ROLE" = "client" ]; then
   exec python client_main.py
-else
-  wait
 fi
+
+python agent_setup.py &
+exec python node_main.py
