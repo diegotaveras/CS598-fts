@@ -1,6 +1,8 @@
 import Peers
 import asyncio
 import Agents
+import hashlib
+import json
 from protocol.proto_state import ProtocolState
 import network_pb2
 
@@ -28,6 +30,24 @@ class Node:
 
     def connect_agent(self, socket, agent_id="local_agent"):
         self.agent_manager.connect_agent(socket, agent_id)
+
+    def _digest_client_request(self, request):
+        payload = {
+            "request_id": request.request_id,
+            "client_id": request.client_id,
+            "prompt": request.prompt,
+            "timestamp": request.timestamp,
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _build_nondeterministic_data(self, request):
+        return json.dumps(
+            {
+                "client_timestamp": request.timestamp,
+            },
+            sort_keys=True,
+        )
         
     async def process_prompt(self, prompt, sender):
         try:
@@ -66,6 +86,10 @@ class Node:
     async def multicast_prompt(self, request):
         results = {}
         prompt = request.prompt
+        seqno = self.proto.allocate_seqno()
+        request_digest = self._digest_client_request(request)
+        history_digest = self.proto.advance_history(request_digest)
+        nondeterministic_data = self._build_nondeterministic_data(request)
 
         # send to local agent
         asyncio.create_task(self.process_prompt(prompt, self.node_id))
@@ -74,12 +98,18 @@ class Node:
         msg = network_pb2.ProtocolMessage(
             sender=self.self_addr,
             ordered_request=network_pb2.OrderedRequest(
-                request_id=request.request_id,
-                client_id=request.client_id,
+                client_request=network_pb2.ClientRequest(
+                    request_id=request.request_id,
+                    client_id=request.client_id,
+                    prompt=request.prompt,
+                    timestamp=request.timestamp,
+                ),
                 view=self.proto.current_view,
-                seqno=0,
-                prompt=request.prompt,
-                leader_id="2",
+                seqno=seqno,
+                request_digest=request_digest,
+                history_digest=history_digest,
+                nondeterministic_data=nondeterministic_data,
+                leader_id=self.proto.primary_id,
             ),
         )
       
@@ -121,7 +151,7 @@ class Node:
         asyncio.create_task(self.multicast_prompt(request))
 
     async def handle_ordered_request(self, request, sender):
-        asyncio.create_task(self.process_prompt(request.prompt, sender))
+        asyncio.create_task(self.process_prompt(request.client_request.prompt, sender))
 
 
         

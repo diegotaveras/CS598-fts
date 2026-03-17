@@ -32,11 +32,11 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
             )
             asyncio.create_task(self.node.handle_client_request(cr))
         elif request.HasField("ordered_request"):
-            # simple prompt processing (no multicast) if not a client_request
             orq = request.ordered_request
             print(
                 f"[{NODE_ID}] received ordered_request from {request.sender}: "
-                f"request_id={orq.request_id} seqno={orq.seqno}",
+                f"request_id={orq.client_request.request_id} "
+                f"seqno={orq.seqno} digest={orq.request_digest[:12]}",
                 flush=True,
             )
             asyncio.create_task(self.node.handle_ordered_request(orq, request.sender))
