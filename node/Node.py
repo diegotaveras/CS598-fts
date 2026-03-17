@@ -64,6 +64,39 @@ class Node:
             },
             sort_keys=True,
         )
+
+    def _digest_text(self, text):
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _is_well_formed_client_request(self, request):
+        return bool(request.request_id and request.client_id and request.prompt)
+
+    def _sender_matches_primary(self, sender, leader_id):
+        sender_host = sender.split(":", 1)[0]
+        normalized_sender = sender_host.replace("node", "")
+        return normalized_sender == str(leader_id)
+
+    def _validate_ordered_request(self, request, sender):
+        if not self._sender_matches_primary(sender, request.leader_id):
+            return False, "sender is not the current primary"
+
+        client_request = request.client_request
+        if not self._is_well_formed_client_request(client_request):
+            return False, "client request is not well formed"
+
+        computed_digest = self._digest_client_request(client_request)
+        if computed_digest != request.request_digest:
+            return False, "request digest does not match client request"
+
+        expected_seqno = self.proto.seqnum + 1
+        if request.seqno != expected_seqno:
+            return False, f"expected seqno {expected_seqno}, got {request.seqno}"
+
+        expected_history_digest = self.proto.expected_history_digest(request.request_digest)
+        if request.history_digest != expected_history_digest:
+            return False, "history digest does not match local history"
+
+        return True, "accepted"
         
     async def process_prompt(self, prompt, sender):
         try:
@@ -83,6 +116,7 @@ class Node:
                 sender=sender,
                 result=agent_result,
             )
+            return agent_result
         except Exception as e:
             print(
                 f"[{self.node_id}] failed to forward message to local agent: {e}",
@@ -93,6 +127,7 @@ class Node:
                 sender=sender,
                 error=str(e),
             )
+            return None
 
     async def handshake_loop(self):
         await asyncio.sleep(2)
@@ -112,46 +147,48 @@ class Node:
 
     async def multicast_prompt(self, request):
         results = {}
-        prompt = request.prompt
-        seqno = self.proto.allocate_seqno()
+        next_seqno = self.proto.seqnum + 1
         request_digest = self._digest_client_request(request)
-        history_digest = self.proto.advance_history(request_digest)
+        history_digest = self.proto.expected_history_digest(request_digest)
         nondeterministic_data = self._build_nondeterministic_data(request)
         self.log_event(
             "ordered_request_created",
             request_id=request.request_id,
             client_id=request.client_id,
-            seqno=seqno,
+            seqno=next_seqno,
             view=self.proto.current_view,
             request_digest=request_digest,
             history_digest=history_digest,
             nondeterministic_data=nondeterministic_data,
         )
 
-        # send to local agent
-        asyncio.create_task(self.process_prompt(prompt, self.node_id))
-
-        # multicast to peers
-        msg = network_pb2.ProtocolMessage(
-            sender=self.self_addr,
-            ordered_request=network_pb2.OrderedRequest(
-                client_request=network_pb2.ClientRequest(
-                    request_id=request.request_id,
-                    client_id=request.client_id,
-                    prompt=request.prompt,
-                    timestamp=request.timestamp,
-                ),
-                view=self.proto.current_view,
-                seqno=seqno,
-                request_digest=request_digest,
-                history_digest=history_digest,
-                nondeterministic_data=nondeterministic_data,
-                leader_id=self.proto.primary_id,
+        ordered_request = network_pb2.OrderedRequest(
+            client_request=network_pb2.ClientRequest(
+                request_id=request.request_id,
+                client_id=request.client_id,
+                prompt=request.prompt,
+                timestamp=request.timestamp,
             ),
+            view=self.proto.current_view,
+            seqno=next_seqno,
+            request_digest=request_digest,
+            history_digest=history_digest,
+            nondeterministic_data=nondeterministic_data,
+            leader_id=self.proto.primary_id,
         )
-      
+
+        local_task = asyncio.create_task(
+            self.handle_ordered_request(ordered_request, self.self_addr)
+        )
+
         send_tasks = [
-            self.peer_manager.send_message(peer, msg)
+            self.peer_manager.send_message(
+                peer,
+                network_pb2.ProtocolMessage(
+                    sender=self.self_addr,
+                    ordered_request=ordered_request,
+                ),
+            )
             for peer in self.peer_manager.peers if peer != self.client_addr
         ]
 
@@ -165,7 +202,7 @@ class Node:
                     "ordered_request_send_failed",
                     peer=peer,
                     request_id=request.request_id,
-                    seqno=seqno,
+                    seqno=next_seqno,
                     error=str(result),
                 )
             else:
@@ -174,10 +211,11 @@ class Node:
                     "ordered_request_sent",
                     peer=peer,
                     request_id=request.request_id,
-                    seqno=seqno,
+                    seqno=next_seqno,
                     ok=bool(result),
                 )
 
+        await local_task
         return results
 
 
@@ -222,7 +260,83 @@ class Node:
             history_digest=request.history_digest,
             nondeterministic_data=request.nondeterministic_data,
         )
-        asyncio.create_task(self.process_prompt(request.client_request.prompt, sender))
+        accepted, reason = self._validate_ordered_request(request, sender)
+        if not accepted:
+            self.log_event(
+                "ordered_request_rejected",
+                sender=sender,
+                request_id=request.client_request.request_id,
+                seqno=request.seqno,
+                reason=reason,
+            )
+            return
+
+        self.proto.append_ordered_request(request)
+        self.log_event(
+            "ordered_request_accepted",
+            sender=sender,
+            request_id=request.client_request.request_id,
+            seqno=request.seqno,
+            history_digest=request.history_digest,
+        )
+
+        result = await self.process_prompt(request.client_request.prompt, sender)
+        if result is None:
+            return
+
+        result_digest = self._digest_text(result)
+        speculative_reply = network_pb2.SpeculativeReply(
+            request_id=request.client_request.request_id,
+            client_id=request.client_request.client_id,
+            view=request.view,
+            seqno=request.seqno,
+            history_digest=request.history_digest,
+            result_digest=result_digest,
+            replica_id=self.node_id,
+            result=result,
+            ordered_request=request,
+        )
+        self.log_event(
+            "speculative_reply_created",
+            request_id=speculative_reply.request_id,
+            client_id=speculative_reply.client_id,
+            seqno=speculative_reply.seqno,
+            view=speculative_reply.view,
+            history_digest=speculative_reply.history_digest,
+            result_digest=speculative_reply.result_digest,
+            replica_id=speculative_reply.replica_id,
+        )
+        await self.send_speculative_reply(speculative_reply)
+
+    async def handle_speculative_reply(self, reply, sender):
+        self.log_event(
+            "speculative_reply_received",
+            sender=sender,
+            request_id=reply.request_id,
+            client_id=reply.client_id,
+            seqno=reply.seqno,
+            view=reply.view,
+            history_digest=reply.history_digest,
+            result_digest=reply.result_digest,
+            replica_id=reply.replica_id,
+            ordered_request_seqno=reply.ordered_request.seqno if reply.HasField("ordered_request") else None,
+        )
+
+    async def send_speculative_reply(self, reply):
+        msg = network_pb2.ProtocolMessage(
+            sender=self.self_addr,
+            speculative_reply=reply,
+        )
+        ok = await self.peer_manager.send_message(self.client_addr, msg)
+        self.log_event(
+            "speculative_reply_sent",
+            client_addr=self.client_addr,
+            request_id=reply.request_id,
+            seqno=reply.seqno,
+            replica_id=reply.replica_id,
+            ok=bool(ok),
+        )
+        return ok
 
 
         
