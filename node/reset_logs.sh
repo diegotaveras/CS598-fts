@@ -6,10 +6,10 @@ LOG_DIR="$SCRIPT_DIR/logs"
 
 mkdir -p "$LOG_DIR"
 
-for file in "$LOG_DIR"/node*.log; do
+for file in "$LOG_DIR"/node*.log "$LOG_DIR"/client*.log; do
   if [ -f "$file" ]; then
     : > "$file"
   fi
 done
 
-echo "Reset node log files in $LOG_DIR"
+echo "Reset node and client log files in $LOG_DIR"
