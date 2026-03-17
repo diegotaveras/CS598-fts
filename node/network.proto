@@ -57,7 +57,9 @@ message SpeculativeReply {
   string client_id = 2;
   int32 view = 3;
   int32 seqno = 4;
-  int32 round_no = 5;
-  bool approved_leader = 6;
-  string result = 7;
+  string history_digest = 5;
+  string result_digest = 6;
+  string replica_id = 7;
+  string result = 8;
+  OrderedRequest ordered_request = 9;
 }
