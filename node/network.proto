@@ -43,12 +43,13 @@ message ClientRequest {
 }
 
 message OrderedRequest {
-  string request_id = 1;
-  string client_id = 2;
-  int32 view = 3;
-  int32 seqno = 4;
-  string prompt = 5;
-  string leader_id = 6;
+  ClientRequest client_request = 1;
+  int32 view = 2;
+  int32 seqno = 3;
+  string request_digest = 4;
+  string history_digest = 5;
+  string nondeterministic_data = 6;
+  string leader_id = 7;
 }
 
 message SpeculativeReply {
