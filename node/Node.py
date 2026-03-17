@@ -1,13 +1,15 @@
 import Peers
 import asyncio
 import Agents
+from datetime import datetime, timezone
 import hashlib
 import json
+from pathlib import Path
 from protocol.proto_state import ProtocolState
 import network_pb2
 
 class Node:
-    def __init__(self, node_id, host, port, peers, client_addr):
+    def __init__(self, node_id, host, port, peers, client_addr, log_path=None):
         self.node_id = str(node_id)
         self.host = host
         self.port = int(port)
@@ -18,6 +20,9 @@ class Node:
         self.listen_addr = f"{self.host}:{self.port}"
         self.agent_manager = Agents.AgentManager()
         self.peer_manager = Peers.PeerManager(peers, self.self_addr)
+        default_log_path = Path(__file__).resolve().parent / "logs" / f"node{self.node_id}.log"
+        self.log_path = Path(log_path) if log_path else default_log_path
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.proto = ProtocolState(
         node_id=node_id,
@@ -27,6 +32,17 @@ class Node:
         current_view=0,
         primary_id="2",
     )
+
+    def log_event(self, event_type, **fields):
+        timestamp = datetime.now(timezone.utc).isoformat()
+        entry = {
+            "ts": timestamp,
+            "node_id": self.node_id,
+            "event": event_type,
+            **fields,
+        }
+        with self.log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True) + "\n")
 
     def connect_agent(self, socket, agent_id="local_agent"):
         self.agent_manager.connect_agent(socket, agent_id)
@@ -62,10 +78,20 @@ class Node:
                 f"[{self.node_id}] local agent processed message from {sender}: {agent_result}",
                 flush=True,
             )
+            self.log_event(
+                "agent_result",
+                sender=sender,
+                result=agent_result,
+            )
         except Exception as e:
             print(
                 f"[{self.node_id}] failed to forward message to local agent: {e}",
                 flush=True,
+            )
+            self.log_event(
+                "agent_error",
+                sender=sender,
+                error=str(e),
             )
 
     async def handshake_loop(self):
@@ -82,6 +108,7 @@ class Node:
 
             if not ok:
                 print(f"[{self.node_id}] could not establish contact with {peer}", flush=True)
+                self.log_event("handshake_failed", peer=peer)
 
     async def multicast_prompt(self, request):
         results = {}
@@ -90,6 +117,16 @@ class Node:
         request_digest = self._digest_client_request(request)
         history_digest = self.proto.advance_history(request_digest)
         nondeterministic_data = self._build_nondeterministic_data(request)
+        self.log_event(
+            "ordered_request_created",
+            request_id=request.request_id,
+            client_id=request.client_id,
+            seqno=seqno,
+            view=self.proto.current_view,
+            request_digest=request_digest,
+            history_digest=history_digest,
+            nondeterministic_data=nondeterministic_data,
+        )
 
         # send to local agent
         asyncio.create_task(self.process_prompt(prompt, self.node_id))
@@ -124,8 +161,22 @@ class Node:
             if isinstance(result, Exception):
                 print(f"[{self.node_id}] failed to multicast to {peer}: {result}", flush=True)
                 results[peer] = False
+                self.log_event(
+                    "ordered_request_send_failed",
+                    peer=peer,
+                    request_id=request.request_id,
+                    seqno=seqno,
+                    error=str(result),
+                )
             else:
                 results[peer] = result
+                self.log_event(
+                    "ordered_request_sent",
+                    peer=peer,
+                    request_id=request.request_id,
+                    seqno=seqno,
+                    ok=bool(result),
+                )
 
         return results
 
@@ -135,6 +186,7 @@ class Node:
             ok = await self.agent_manager.health_check(agent_id)
             if ok:
                 print(f"[{self.node_id}] agent {agent_id} is ready", flush=True)
+                self.log_event("agent_ready", agent_id=agent_id)
                 return True
 
             print(
@@ -145,12 +197,31 @@ class Node:
             await asyncio.sleep(delay)
 
         print(f"[{self.node_id}] agent {agent_id} failed health check", flush=True)
+        self.log_event("agent_health_failed", agent_id=agent_id)
         return False
     
     async def handle_client_request(self, request):
+        self.log_event(
+            "client_request_received",
+            request_id=request.request_id,
+            client_id=request.client_id,
+            prompt=request.prompt,
+            timestamp=request.timestamp,
+        )
         asyncio.create_task(self.multicast_prompt(request))
 
     async def handle_ordered_request(self, request, sender):
+        self.log_event(
+            "ordered_request_received",
+            sender=sender,
+            request_id=request.client_request.request_id,
+            client_id=request.client_request.client_id,
+            seqno=request.seqno,
+            view=request.view,
+            request_digest=request.request_digest,
+            history_digest=request.history_digest,
+            nondeterministic_data=request.nondeterministic_data,
+        )
         asyncio.create_task(self.process_prompt(request.client_request.prompt, sender))
 
 

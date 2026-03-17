@@ -13,12 +13,14 @@ PEERS = os.getenv("PEERS", "").split(",") if os.getenv("PEERS") else []
 SELF_ADDR = os.getenv("SELF_ADDR", f"node{NODE_ID}:{PORT}")
 AGENT_SOCKET_PATH = os.getenv("AGENT_SOCKET_PATH", "/tmp/agent.sock")
 CLIENT_ADDR = os.getenv("CLIENT_ADDR", "1")
+LOG_PATH = os.getenv("LOG_PATH")
 
 class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
     def __init__(self, node):
         self.node = node
     async def Ping(self, request, context):
         print(f"[{NODE_ID}] got ping from {request.sender}", flush=True)
+        self.node.log_event("ping_received", sender=request.sender)
         return network_pb2.PingReply(node_id=str(NODE_ID), status="alive")
 
     async def HandleProtocolMessage(self, request, context):
@@ -30,6 +32,14 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
                 f"request_id={cr.request_id} client_id={cr.client_id} prompt={cr.prompt}",
                 flush=True,
             )
+            self.node.log_event(
+                "client_request_rpc_received",
+                sender=request.sender,
+                request_id=cr.request_id,
+                client_id=cr.client_id,
+                prompt=cr.prompt,
+                timestamp=cr.timestamp,
+            )
             asyncio.create_task(self.node.handle_client_request(cr))
         elif request.HasField("ordered_request"):
             orq = request.ordered_request
@@ -39,13 +49,23 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
                 f"seqno={orq.seqno} digest={orq.request_digest[:12]}",
                 flush=True,
             )
+            self.node.log_event(
+                "ordered_request_rpc_received",
+                sender=request.sender,
+                request_id=orq.client_request.request_id,
+                client_id=orq.client_request.client_id,
+                seqno=orq.seqno,
+                view=orq.view,
+                request_digest=orq.request_digest,
+                history_digest=orq.history_digest,
+            )
             asyncio.create_task(self.node.handle_ordered_request(orq, request.sender))
 
         
         return network_pb2.MessageReply(status="received")
 
 
-node = Node.Node(NODE_ID, HOST, PORT, PEERS, CLIENT_ADDR)
+node = Node.Node(NODE_ID, HOST, PORT, PEERS, CLIENT_ADDR, LOG_PATH)
 
 
 async def node_loop(node):
@@ -72,17 +92,20 @@ async def serve():
     server.add_insecure_port(listen_addr)
 
     print(f"[{NODE_ID}] starting gRPC server on {listen_addr}", flush=True)
+    node.log_event("server_starting", listen_addr=listen_addr)
 
     node.peer_manager.connect_all()
 
     await server.start()
     print(f"[{NODE_ID}] gRPC server started", flush=True)
+    node.log_event("server_started", listen_addr=listen_addr)
 
     # connect to agent socket
     node.connect_agent(f"unix://{AGENT_SOCKET_PATH}", "local_agent")
     agent_ready = await node.agent_health_check("local_agent")
     if not agent_ready:
         print(f"[{NODE_ID}] proceeding without ready agent", flush=True)
+        node.log_event("agent_not_ready")
 
     asyncio.create_task(node_loop(node))
 

@@ -9,3 +9,14 @@ pip install uv
 uv pip install -r requirements.txt
 ```
 
+## Debug Logs
+
+Reset node log files manually:
+```bash
+./node/reset_logs.sh
+```
+
+Or clear them automatically on startup:
+```bash
+RESET_LOGS=1 docker compose up --build
+```

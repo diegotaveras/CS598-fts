@@ -3,6 +3,10 @@ set -e
 
 cd /app/node
 
+if [ "$RESET_LOGS" = "1" ]; then
+  ./reset_logs.sh
+fi
+
 python agent_setup.py &
 python node_main.py &
 
