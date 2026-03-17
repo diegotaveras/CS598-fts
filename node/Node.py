@@ -5,11 +5,11 @@ from protocol.proto_state import ProtocolState
 import network_pb2
 
 class Node:
-    def __init__(self, node_id, host, port, peers):
+    def __init__(self, node_id, host, port, peers, client_addr):
         self.node_id = str(node_id)
         self.host = host
         self.port = int(port)
-        self.client_id = "1"
+        self.client_addr = client_addr
 
         self.hostname = f"node{self.node_id}"
         self.self_addr = f"{self.hostname}:{self.port}"
@@ -85,7 +85,7 @@ class Node:
       
         send_tasks = [
             self.peer_manager.send_message(peer, msg)
-            for peer in self.peer_manager.peers if peer != f"node{self.client_id}:8000"
+            for peer in self.peer_manager.peers if peer != self.client_addr
         ]
 
         send_results = await asyncio.gather(*send_tasks, return_exceptions=True)

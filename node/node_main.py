@@ -12,6 +12,7 @@ PORT = int(os.getenv("PORT", "8000"))
 PEERS = os.getenv("PEERS", "").split(",") if os.getenv("PEERS") else []
 SELF_ADDR = os.getenv("SELF_ADDR", f"node{NODE_ID}:{PORT}")
 AGENT_SOCKET_PATH = os.getenv("AGENT_SOCKET_PATH", "/tmp/agent.sock")
+CLIENT_ADDR = os.getenv("CLIENT_ADDR", "1")
 
 class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
     def __init__(self, node):
@@ -44,7 +45,7 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
         return network_pb2.MessageReply(status="received")
 
 
-node = Node.Node(NODE_ID, HOST, PORT, PEERS)
+node = Node.Node(NODE_ID, HOST, PORT, PEERS, CLIENT_ADDR)
 
 
 async def node_loop(node):

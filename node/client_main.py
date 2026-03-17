@@ -4,7 +4,7 @@ import grpc
 import network_pb2
 import network_pb2_grpc
 from grpc_reflection.v1alpha import reflection
-
+import time
 import Client
 
 
@@ -51,6 +51,7 @@ async def client_loop():
             request_id="0",
             client_id=str(CLIENT_ID),
             prompt=TEST_PROMPT,
+            timestamp=int(time.time())
         ),
     )
     

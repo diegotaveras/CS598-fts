@@ -15,6 +15,6 @@ class ProtocolState:
         self.f = f
         self.n = len(peers)
         self.current_view = current_view
-
+        self.seqnum = 0
         self.primary_id = primary_id if primary_id is not None else "1"
     
