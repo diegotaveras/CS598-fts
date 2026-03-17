@@ -26,12 +26,17 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
         print(f"[client {CLIENT_ID}] got ping from {request.sender}", flush=True)
         return network_pb2.PingReply(node_id=f"client{CLIENT_ID}", status="alive")
 
-    async def SendMessage(self, request, context):
-        print(
-            f"[client {CLIENT_ID}] received reply from {request.sender}: {request.msg}",
-            flush=True,
-        )
-        return network_pb2.MessageReply(status="received")
+    async def HandleProtocolMessage(self, request, context):
+        if request.HasField("speculative_reply"):
+            sr = request.speculative_reply
+            print(
+                f"[client {CLIENT_ID}] received speculative_reply from {request.sender}: "
+                f"request_id={sr.request_id} seqno={sr.seqno} replica={sr.replica_id}",
+                flush=True,
+            )
+            return network_pb2.MessageReply(status="received")
+
+        return network_pb2.MessageReply(status="ignored")
 
 
 client = Client.Client(CLIENT_ID, HOST, CLIENT_PORT, REPLICAS)
