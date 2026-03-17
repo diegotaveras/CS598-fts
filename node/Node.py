@@ -308,20 +308,6 @@ class Node:
         )
         await self.send_speculative_reply(speculative_reply)
 
-    async def handle_speculative_reply(self, reply, sender):
-        self.log_event(
-            "speculative_reply_received",
-            sender=sender,
-            request_id=reply.request_id,
-            client_id=reply.client_id,
-            seqno=reply.seqno,
-            view=reply.view,
-            history_digest=reply.history_digest,
-            result_digest=reply.result_digest,
-            replica_id=reply.replica_id,
-            ordered_request_seqno=reply.ordered_request.seqno if reply.HasField("ordered_request") else None,
-        )
-
     async def send_speculative_reply(self, reply):
         msg = network_pb2.ProtocolMessage(
             sender=self.self_addr,

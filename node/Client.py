@@ -1,10 +1,13 @@
 import Peers
 import asyncio
+from datetime import datetime, timezone
+import json
+from pathlib import Path
 from protocol.proto_state import ProtocolState
 
 
 class Client:
-    def __init__(self, client_id, host, port, replicas):
+    def __init__(self, client_id, host, port, replicas, log_path=None):
         self.client_id = str(client_id)
         self.host = host
         self.port = int(port)
@@ -14,6 +17,9 @@ class Client:
         self.listen_addr = f"{self.host}:{self.port}"
 
         self.peer_manager = Peers.PeerManager(replicas, self.self_addr)
+        default_log_path = Path(__file__).resolve().parent / "logs" / f"client{self.client_id}.log"
+        self.log_path = Path(log_path) if log_path else default_log_path
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.proto = ProtocolState(
             node_id=client_id,
@@ -23,6 +29,17 @@ class Client:
             current_view=0,
             primary_id="2",
         )
+
+    def log_event(self, event_type, **fields):
+        timestamp = datetime.now(timezone.utc).isoformat()
+        entry = {
+            "ts": timestamp,
+            "client_id": self.client_id,
+            "event": event_type,
+            **fields,
+        }
+        with self.log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True) + "\n")
 
     async def handshake_loop(self):
         await asyncio.sleep(2)
@@ -41,17 +58,35 @@ class Client:
                     f"[client {self.client_id}] could not establish contact with {replica}",
                     flush=True,
                 )
+                self.log_event("handshake_failed", replica=replica)
 
     async def send_request(self, replica, msg):
         try:
             ok = await self.peer_manager.send_message(replica, msg)
+            self.log_event("client_request_sent", replica=replica, ok=bool(ok))
             return ok
         except Exception as e:
             print(
                 f"[client {self.client_id}] failed to send request to {replica}: {e}",
                 flush=True,
             )
+            self.log_event("client_request_send_failed", replica=replica, error=str(e))
             return False
+
+    async def handle_speculative_reply(self, reply, sender):
+        self.log_event(
+            "speculative_reply_received",
+            sender=sender,
+            request_id=reply.request_id,
+            client_id=reply.client_id,
+            seqno=reply.seqno,
+            view=reply.view,
+            history_digest=reply.history_digest,
+            result_digest=reply.result_digest,
+            replica_id=reply.replica_id,
+            ordered_request_seqno=reply.ordered_request.seqno if reply.HasField("ordered_request") else None,
+            result=reply.result,
+        )
 
     async def broadcast_request(self, msg):
         results = {}
