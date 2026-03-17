@@ -39,6 +39,7 @@ message ClientRequest {
   string request_id = 1;
   string client_id = 2;
   string prompt = 3;
+  uint64 timestamp = 4;
 }
 
 message OrderedRequest {
