@@ -42,7 +42,7 @@ class InferenceClient:
         payload.update(overrides)
         return payload
 
-    async def run_inference(self, messages, timeout=60.0, **overrides):
+    async def run_inference(self, messages, timeout=120.0, **overrides):
         url = self._chat_url()
         headers = self._headers()
         payload = self._build_payload(messages, **overrides)
@@ -54,7 +54,7 @@ class InferenceClient:
 
         return data
 
-    async def get_text(self, messages, timeout=60.0, **overrides):
+    async def get_text(self, messages, timeout=120.0, **overrides):
         data = await self.run_inference(messages, timeout=timeout, **overrides)
         # print("RAW INFERENCE RESPONSE:", data, flush=True)
 
