@@ -15,12 +15,12 @@ class Node:
         self.port = int(port)
         self.client_addr = client_addr
 
-        self.hostname = f"node{self.node_id}"
+        self.hostname = self.node_id
         self.self_addr = f"{self.hostname}:{self.port}"
         self.listen_addr = f"{self.host}:{self.port}"
         self.agent_manager = Agents.AgentManager()
         self.peer_manager = Peers.PeerManager(peers, self.self_addr)
-        default_log_path = Path(__file__).resolve().parent / "logs" / f"node{self.node_id}.log"
+        default_log_path = Path(__file__).resolve().parent / "logs" / f"{self.node_id}.log"
         self.log_path = Path(log_path) if log_path else default_log_path
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -30,7 +30,7 @@ class Node:
         role="replica",
         f=1,
         current_view=0,
-        primary_id="2",
+        primary_id="node2",
     )
 
     def log_event(self, event_type, **fields):
@@ -72,9 +72,7 @@ class Node:
         return bool(request.request_id and request.client_id and request.prompt)
 
     def _sender_matches_primary(self, sender, leader_id):
-        sender_host = sender.split(":", 1)[0]
-        normalized_sender = sender_host.replace("node", "")
-        return normalized_sender == str(leader_id)
+        return sender == str(leader_id)
 
     def _validate_ordered_request(self, request, sender):
         if not self._sender_matches_primary(sender, request.leader_id):
@@ -178,14 +176,14 @@ class Node:
         )
 
         local_task = asyncio.create_task(
-            self.handle_ordered_request(ordered_request, self.self_addr)
+            self.handle_ordered_request(ordered_request, self.node_id)
         )
 
         send_tasks = [
             self.peer_manager.send_message(
                 peer,
                 network_pb2.ProtocolMessage(
-                    sender=self.self_addr,
+                    sender=self.node_id,
                     ordered_request=ordered_request,
                 ),
             )
@@ -310,7 +308,7 @@ class Node:
 
     async def send_speculative_reply(self, reply):
         msg = network_pb2.ProtocolMessage(
-            sender=self.self_addr,
+            sender=self.node_id,
             speculative_reply=reply,
         )
         ok = await self.peer_manager.send_message(self.client_addr, msg)

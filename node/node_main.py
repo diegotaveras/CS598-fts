@@ -10,9 +10,9 @@ NODE_ID = os.getenv("NODE_ID", "node")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 PEERS = os.getenv("PEERS", "").split(",") if os.getenv("PEERS") else []
-SELF_ADDR = os.getenv("SELF_ADDR", f"node{NODE_ID}:{PORT}")
+SELF_ADDR = os.getenv("SELF_ADDR", f"{NODE_ID}:{PORT}")
 AGENT_SOCKET_PATH = os.getenv("AGENT_SOCKET_PATH", "/tmp/agent.sock")
-CLIENT_ADDR = os.getenv("CLIENT_ADDR", "1")
+CLIENT_ADDR = os.getenv("CLIENT_ADDR", "node1:9000")
 LOG_PATH = os.getenv("LOG_PATH")
 
 class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
@@ -73,7 +73,7 @@ async def node_loop(node):
     await node.handshake_loop()
     
     # testing a prompt multicast to all nodes (including itself)
-    if node.node_id == "1":
+    if node.node_id == "node1":
         pass
         # asyncio.create_task(node.multicast_prompt(prompt="explain RAFT consensus protocol"))
     

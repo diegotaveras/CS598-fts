@@ -8,7 +8,7 @@ import time
 import Client
 
 
-CLIENT_ID = os.getenv("CLIENT_ID", "1")
+CLIENT_ID = os.getenv("CLIENT_ID", "client1")
 HOST = os.getenv("HOST", "0.0.0.0")
 CLIENT_PORT = int(os.getenv("CLIENT_PORT", "9000"))
 
@@ -26,7 +26,7 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
     async def Ping(self, request, context):
         print(f"[client {CLIENT_ID}] got ping from {request.sender}", flush=True)
         self.client.log_event("ping_received", sender=request.sender)
-        return network_pb2.PingReply(node_id=f"client{CLIENT_ID}", status="alive")
+        return network_pb2.PingReply(node_id=str(CLIENT_ID), status="alive")
 
     async def HandleProtocolMessage(self, request, context):
         if request.HasField("speculative_reply"):

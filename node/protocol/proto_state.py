@@ -9,7 +9,7 @@ class ProtocolState:
         role: str = "replica",
         f: int = 1,
         current_view: int = 0,
-        primary_id = "1",
+        primary_id = "node1",
     ):
 
         self.node_id = str(node_id)
@@ -21,7 +21,7 @@ class ProtocolState:
         self.seqnum = 0
         self.history_digest = "GENESIS"
         self.ordered_history = []
-        self.primary_id = primary_id if primary_id is not None else "1"
+        self.primary_id = primary_id if primary_id is not None else "node1"
 
     def allocate_seqno(self) -> int:
         self.seqnum += 1
