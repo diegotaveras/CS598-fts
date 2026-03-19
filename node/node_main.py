@@ -60,6 +60,22 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
                 history_digest=orq.history_digest,
             )
             asyncio.create_task(self.node.handle_ordered_request(orq, request.sender))
+        elif request.HasField("fill_hole_request"):
+            fhr = request.fill_hole_request
+            print(
+                f"[{NODE_ID}] received fill_hole_request from {request.sender}: "
+                f"replica_id={fhr.replica_id} start={fhr.start_seqno} end={fhr.end_seqno}",
+                flush=True,
+            )
+            self.node.log_event(
+                "fill_hole_request_rpc_received",
+                sender=request.sender,
+                replica_id=fhr.replica_id,
+                view=fhr.view,
+                start_seqno=fhr.start_seqno,
+                end_seqno=fhr.end_seqno,
+            )
+            asyncio.create_task(self.node.handle_fill_hole_request(fhr, request.sender))
 
         
         return network_pb2.MessageReply(status="received")

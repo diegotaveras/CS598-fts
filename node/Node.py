@@ -322,6 +322,46 @@ class Node:
         )
         return ok
 
+    async def handle_fill_hole_request(self, request, sender):
+        self.log_event(
+            "fill_hole_request_received",
+            sender=sender,
+            replica_id=request.replica_id,
+            view=request.view,
+            start_seqno=request.start_seqno,
+            end_seqno=request.end_seqno,
+        )
+
+        if self.node_id != self.proto.primary_id:
+            self.log_event(
+                "fill_hole_request_ignored",
+                sender=sender,
+                replica_id=request.replica_id,
+                view=request.view,
+                reason="not_primary",
+            )
+            return
+
+        if request.view != self.proto.current_view:
+            self.log_event(
+                "fill_hole_request_ignored",
+                sender=sender,
+                replica_id=request.replica_id,
+                view=request.view,
+                reason="view_mismatch",
+                current_view=self.proto.current_view,
+            )
+            return
+
+        self.log_event(
+            "fill_hole_request_accepted_for_future_handling",
+            sender=sender,
+            replica_id=request.replica_id,
+            view=request.view,
+            start_seqno=request.start_seqno,
+            end_seqno=request.end_seqno,
+        )
+
 
         
 
