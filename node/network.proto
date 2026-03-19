@@ -32,6 +32,8 @@ message ProtocolMessage {
     ClientRequest client_request = 2;
     OrderedRequest ordered_request = 3;
     SpeculativeReply speculative_reply = 4;
+    FillHoleRequest fill_hole_request = 5;
+    FillHoleResponse fill_hole_response = 6;
   }
 }
 
@@ -62,4 +64,17 @@ message SpeculativeReply {
   string replica_id = 7;
   string result = 8;
   OrderedRequest ordered_request = 9;
+}
+
+message FillHoleRequest {
+  int32 view = 1;
+  int32 start_seqno = 2;
+  int32 end_seqno = 3;
+  string replica_id = 4;
+}
+
+message FillHoleResponse {
+  int32 view = 1;
+  string responder_id = 2;
+  repeated OrderedRequest ordered_requests = 3;
 }
