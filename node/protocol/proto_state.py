@@ -21,6 +21,7 @@ class ProtocolState:
         self.seqnum = 0
         self.history_digest = "GENESIS"
         self.ordered_history = []
+        self.ordered_requests_by_seq = {}
         self.primary_id = primary_id if primary_id is not None else "node1"
 
     def allocate_seqno(self) -> int:
@@ -40,4 +41,15 @@ class ProtocolState:
         self.seqnum = ordered_request.seqno
         self.history_digest = ordered_request.history_digest
         self.ordered_history.append(ordered_request)
+        self.ordered_requests_by_seq[ordered_request.seqno] = ordered_request
+
+    def get_ordered_request(self, seqno):
+        return self.ordered_requests_by_seq.get(seqno)
+
+    def get_ordered_requests_in_range(self, start_seqno: int, end_seqno: int):
+        return [
+            self.ordered_requests_by_seq[seqno]
+            for seqno in range(start_seqno, end_seqno + 1)
+            if seqno in self.ordered_requests_by_seq
+        ]
     
