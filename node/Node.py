@@ -21,7 +21,7 @@ class Node:
         self.agent_manager = Agents.AgentManager()
         self.peer_manager = Peers.PeerManager(peers, self.self_addr)
         self.fill_hole_timeout_seconds = 1.0
-        self.pending_fill_holes = {}
+        self.pending_fill_hole = None
         default_log_path = Path(__file__).resolve().parent / "logs" / f"{self.node_id}.log"
         self.log_path = Path(log_path) if log_path else default_log_path
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -75,9 +75,6 @@ class Node:
 
     def _sender_matches_primary(self, sender, leader_id):
         return sender == str(leader_id)
-
-    def _fill_hole_key(self, view, start_seqno, end_seqno):
-        return (int(view), int(start_seqno), int(end_seqno))
 
     def _address_for_replica_id(self, replica_id):
         if self.node_id == replica_id:
@@ -339,6 +336,22 @@ class Node:
         )
         return ok
 
+    async def send_fill_hole_response(self, response, target):
+        msg = network_pb2.ProtocolMessage(
+            sender=self.node_id,
+            fill_hole_response=response,
+        )
+        ok = await self.peer_manager.send_message(target, msg)
+        self.log_event(
+            "fill_hole_response_sent",
+            target=target,
+            responder_id=response.responder_id,
+            view=response.view,
+            ordered_request_count=len(response.ordered_requests),
+            ok=bool(ok),
+        )
+        return ok
+
     async def broadcast_fill_hole_request(self, request):
         targets = [peer for peer in self.peer_manager.peers if peer != self.self_addr]
         send_results = await asyncio.gather(
@@ -354,36 +367,74 @@ class Node:
             sent_count=len(send_results),
         )
 
-    async def _fill_hole_timer_worker(self, key):
+    async def _fill_hole_timer_worker(self, request):
         try:
             await asyncio.sleep(self.fill_hole_timeout_seconds)
-            pending = self.pending_fill_holes.get(key)
+            pending = self.pending_fill_hole
             if pending is None:
                 return
-            request = pending["request"]
+            pending_request = pending["request"]
+            if (
+                pending_request.view != request.view
+                or pending_request.start_seqno != request.start_seqno
+                or pending_request.end_seqno != request.end_seqno
+            ):
+                return
 
             self.log_event(
                 "fill_hole_timer_fired",
-                replica_id=request.replica_id,
+                replica_id=pending_request.replica_id,
+                view=pending_request.view,
+                start_seqno=pending_request.start_seqno,
+                end_seqno=pending_request.end_seqno,
+            )
+            await self.broadcast_fill_hole_request(pending_request)
+        except asyncio.CancelledError:
+            self.log_event(
+                "fill_hole_timer_cancelled",
                 view=request.view,
                 start_seqno=request.start_seqno,
                 end_seqno=request.end_seqno,
             )
-            await self.broadcast_fill_hole_request(request)
-        except asyncio.CancelledError:
-            self.log_event("fill_hole_timer_cancelled", key=str(key))
             raise
         finally:
-            self.pending_fill_holes.pop(key, None)
+            pending = self.pending_fill_hole
+            if pending is not None:
+                pending_request = pending["request"]
+                if (
+                    pending_request.view == request.view
+                    and pending_request.start_seqno == request.start_seqno
+                    and pending_request.end_seqno == request.end_seqno
+                ):
+                    self.pending_fill_hole = None
 
     def _ensure_fill_hole_timer(self, request):
-        key = self._fill_hole_key(request.view, request.start_seqno, request.end_seqno)
-        if key in self.pending_fill_holes:
-            return
-        task = asyncio.create_task(
-            self._fill_hole_timer_worker(key)
-        )
-        self.pending_fill_holes[key] = {
+        existing = self.pending_fill_hole
+        if existing is not None:
+            existing_request = existing["request"]
+            if existing_request.view == request.view:
+                if (
+                    existing_request.start_seqno <= request.start_seqno
+                    and existing_request.end_seqno >= request.end_seqno
+                ):
+                    self.log_event(
+                        "fill_hole_request_already_pending",
+                        replica_id=request.replica_id,
+                        view=request.view,
+                        start_seqno=request.start_seqno,
+                        end_seqno=request.end_seqno,
+                        pending_start_seqno=existing_request.start_seqno,
+                        pending_end_seqno=existing_request.end_seqno,
+                    )
+                    return False
+                self.cancel_fill_hole_timer(
+                    existing_request.view,
+                    existing_request.start_seqno,
+                    existing_request.end_seqno,
+                )
+
+        task = asyncio.create_task(self._fill_hole_timer_worker(request))
+        self.pending_fill_hole = {
             "request": request,
             "task": task,
         }
@@ -395,14 +446,24 @@ class Node:
             end_seqno=request.end_seqno,
             timeout_seconds=self.fill_hole_timeout_seconds,
         )
+        return True
 
     def cancel_fill_hole_timer(self, view, start_seqno, end_seqno):
-        key = self._fill_hole_key(view, start_seqno, end_seqno)
-        pending = self.pending_fill_holes.pop(key, None)
+        pending = self.pending_fill_hole
+        if pending is None:
+            return False
+        request = pending["request"]
+        if (
+            request.view != view
+            or request.start_seqno != start_seqno
+            or request.end_seqno != end_seqno
+        ):
+            return False
+        self.pending_fill_hole = None
         task = pending["task"] if pending is not None else None
         if task is not None and not task.done():
             task.cancel()
-        return pending is not None
+        return True
 
     async def request_fill_hole(self, start_seqno, end_seqno):
         request = network_pb2.FillHoleRequest(
@@ -411,7 +472,9 @@ class Node:
             end_seqno=end_seqno,
             replica_id=self.node_id,
         )
-        self._ensure_fill_hole_timer(request)
+        started = self._ensure_fill_hole_timer(request)
+        if not started:
+            return True
 
         primary_addr = self._address_for_replica_id(self.proto.primary_id)
         if primary_addr is None:
@@ -464,25 +527,49 @@ class Node:
             )
             return
 
-        if self.node_id == self.proto.primary_id:
-            self.log_event(
-                "fill_hole_request_accepted_for_primary_handling",
-                sender=sender,
-                replica_id=request.replica_id,
-                view=request.view,
-                start_seqno=request.start_seqno,
-                end_seqno=request.end_seqno,
-            )
-            return
+        available_requests = self.proto.get_ordered_requests_in_range(
+            request.start_seqno,
+            request.end_seqno,
+        )
+        requester_addr = self._address_for_replica_id(request.replica_id)
 
+        handler_role = "primary" if self.node_id == self.proto.primary_id else "replica"
         self.log_event(
-            "fill_hole_request_accepted_for_replica_handling",
+            "fill_hole_request_accepted",
             sender=sender,
+            handler_role=handler_role,
             replica_id=request.replica_id,
             view=request.view,
             start_seqno=request.start_seqno,
             end_seqno=request.end_seqno,
         )
+
+        if requester_addr is None:
+            self.log_event(
+                "fill_hole_response_not_sent",
+                sender=sender,
+                replica_id=request.replica_id,
+                view=request.view,
+                reason="requester_address_not_found",
+            )
+            return
+
+        if not available_requests:
+            self.log_event(
+                "fill_hole_response_not_sent",
+                sender=sender,
+                replica_id=request.replica_id,
+                view=request.view,
+                reason="no_matching_ordered_requests",
+            )
+            return
+
+        response = network_pb2.FillHoleResponse(
+            view=request.view,
+            responder_id=self.node_id,
+            ordered_requests=available_requests,
+        )
+        await self.send_fill_hole_response(response, requester_addr)
 
     async def handle_fill_hole_response(self, response, sender):
         start_seqno = response.ordered_requests[0].seqno if response.ordered_requests else None
@@ -507,19 +594,46 @@ class Node:
             )
             return
 
-        cancelled = self.cancel_fill_hole_timer(
-            response.view,
-            response.ordered_requests[0].seqno,
-            response.ordered_requests[-1].seqno,
-        )
+        sorted_requests = sorted(response.ordered_requests, key=lambda req: req.seqno)
+        for ordered_request in sorted_requests:
+            known = self.proto.get_ordered_request(ordered_request.seqno)
+            if known is not None:
+                if known.request_digest != ordered_request.request_digest:
+                    self.log_event(
+                        "fill_hole_conflict_detected",
+                        sender=sender,
+                        responder_id=response.responder_id,
+                        seqno=ordered_request.seqno,
+                        known_digest=known.request_digest,
+                        received_digest=ordered_request.request_digest,
+                    )
+                continue
+
+            if ordered_request.seqno != self.proto.seqnum + 1:
+                continue
+
+            await self.handle_ordered_request(ordered_request, ordered_request.leader_id)
+
+        cancelled = False
+        pending = self.pending_fill_hole
+        if pending is not None:
+            request = pending["request"]
+            if request.view == response.view and self.proto.seqnum >= request.end_seqno:
+                cancelled = self.cancel_fill_hole_timer(
+                    request.view,
+                    request.start_seqno,
+                    request.end_seqno,
+                )
+
         self.log_event(
             "fill_hole_response_processed",
             sender=sender,
             responder_id=response.responder_id,
             view=response.view,
-            start_seqno=response.ordered_requests[0].seqno,
-            end_seqno=response.ordered_requests[-1].seqno,
+            start_seqno=start_seqno,
+            end_seqno=end_seqno,
             timer_cancelled=bool(cancelled),
+            current_seqno=self.proto.seqnum,
         )
 
 
