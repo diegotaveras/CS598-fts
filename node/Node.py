@@ -20,6 +20,8 @@ class Node:
         self.listen_addr = f"{self.host}:{self.port}"
         self.agent_manager = Agents.AgentManager()
         self.peer_manager = Peers.PeerManager(peers, self.self_addr)
+        self.fill_hole_timeout_seconds = 1.0
+        self.pending_fill_holes = {}
         default_log_path = Path(__file__).resolve().parent / "logs" / f"{self.node_id}.log"
         self.log_path = Path(log_path) if log_path else default_log_path
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +75,17 @@ class Node:
 
     def _sender_matches_primary(self, sender, leader_id):
         return sender == str(leader_id)
+
+    def _fill_hole_key(self, view, start_seqno, end_seqno):
+        return (int(view), int(start_seqno), int(end_seqno))
+
+    def _address_for_replica_id(self, replica_id):
+        if self.node_id == replica_id:
+            return self.self_addr
+        for peer in self.peer_manager.peers:
+            if peer.split(":", 1)[0] == replica_id:
+                return peer
+        return None
 
     def _validate_ordered_request(self, request, sender):
         if not self._sender_matches_primary(sender, request.leader_id):
@@ -260,6 +273,9 @@ class Node:
         )
         accepted, reason = self._validate_ordered_request(request, sender)
         if not accepted:
+            expected_seqno = self.proto.seqnum + 1
+            if request.seqno > expected_seqno:
+                await self.request_fill_hole(expected_seqno, request.seqno)
             self.log_event(
                 "ordered_request_rejected",
                 sender=sender,
@@ -306,6 +322,111 @@ class Node:
         )
         await self.send_speculative_reply(speculative_reply)
 
+    async def send_fill_hole_request(self, request, target):
+        msg = network_pb2.ProtocolMessage(
+            sender=self.node_id,
+            fill_hole_request=request,
+        )
+        ok = await self.peer_manager.send_message(target, msg)
+        self.log_event(
+            "fill_hole_request_sent",
+            target=target,
+            replica_id=request.replica_id,
+            view=request.view,
+            start_seqno=request.start_seqno,
+            end_seqno=request.end_seqno,
+            ok=bool(ok),
+        )
+        return ok
+
+    async def broadcast_fill_hole_request(self, request):
+        targets = [peer for peer in self.peer_manager.peers if peer != self.self_addr]
+        send_results = await asyncio.gather(
+            *(self.send_fill_hole_request(request, target) for target in targets),
+            return_exceptions=True,
+        )
+        self.log_event(
+            "fill_hole_request_broadcast_complete",
+            replica_id=request.replica_id,
+            view=request.view,
+            start_seqno=request.start_seqno,
+            end_seqno=request.end_seqno,
+            sent_count=len(send_results),
+        )
+
+    async def _fill_hole_timer_worker(self, key):
+        try:
+            await asyncio.sleep(self.fill_hole_timeout_seconds)
+            pending = self.pending_fill_holes.get(key)
+            if pending is None:
+                return
+            request = pending["request"]
+
+            self.log_event(
+                "fill_hole_timer_fired",
+                replica_id=request.replica_id,
+                view=request.view,
+                start_seqno=request.start_seqno,
+                end_seqno=request.end_seqno,
+            )
+            await self.broadcast_fill_hole_request(request)
+        except asyncio.CancelledError:
+            self.log_event("fill_hole_timer_cancelled", key=str(key))
+            raise
+        finally:
+            self.pending_fill_holes.pop(key, None)
+
+    def _ensure_fill_hole_timer(self, request):
+        key = self._fill_hole_key(request.view, request.start_seqno, request.end_seqno)
+        if key in self.pending_fill_holes:
+            return
+        task = asyncio.create_task(
+            self._fill_hole_timer_worker(key)
+        )
+        self.pending_fill_holes[key] = {
+            "request": request,
+            "task": task,
+        }
+        self.log_event(
+            "fill_hole_timer_started",
+            replica_id=request.replica_id,
+            view=request.view,
+            start_seqno=request.start_seqno,
+            end_seqno=request.end_seqno,
+            timeout_seconds=self.fill_hole_timeout_seconds,
+        )
+
+    def cancel_fill_hole_timer(self, view, start_seqno, end_seqno):
+        key = self._fill_hole_key(view, start_seqno, end_seqno)
+        pending = self.pending_fill_holes.pop(key, None)
+        task = pending["task"] if pending is not None else None
+        if task is not None and not task.done():
+            task.cancel()
+        return pending is not None
+
+    async def request_fill_hole(self, start_seqno, end_seqno):
+        request = network_pb2.FillHoleRequest(
+            view=self.proto.current_view,
+            start_seqno=start_seqno,
+            end_seqno=end_seqno,
+            replica_id=self.node_id,
+        )
+        self._ensure_fill_hole_timer(request)
+
+        primary_addr = self._address_for_replica_id(self.proto.primary_id)
+        if primary_addr is None:
+            self.log_event(
+                "fill_hole_request_failed",
+                replica_id=request.replica_id,
+                view=request.view,
+                start_seqno=start_seqno,
+                end_seqno=end_seqno,
+                reason="primary_address_not_found",
+            )
+            return False
+
+        return await self.send_fill_hole_request(request, primary_addr)
+
     async def send_speculative_reply(self, reply):
         msg = network_pb2.ProtocolMessage(
             sender=self.node_id,
@@ -332,16 +453,6 @@ class Node:
             end_seqno=request.end_seqno,
         )
 
-        if self.node_id != self.proto.primary_id:
-            self.log_event(
-                "fill_hole_request_ignored",
-                sender=sender,
-                replica_id=request.replica_id,
-                view=request.view,
-                reason="not_primary",
-            )
-            return
-
         if request.view != self.proto.current_view:
             self.log_event(
                 "fill_hole_request_ignored",
@@ -353,13 +464,62 @@ class Node:
             )
             return
 
+        if self.node_id == self.proto.primary_id:
+            self.log_event(
+                "fill_hole_request_accepted_for_primary_handling",
+                sender=sender,
+                replica_id=request.replica_id,
+                view=request.view,
+                start_seqno=request.start_seqno,
+                end_seqno=request.end_seqno,
+            )
+            return
+
         self.log_event(
-            "fill_hole_request_accepted_for_future_handling",
+            "fill_hole_request_accepted_for_replica_handling",
             sender=sender,
             replica_id=request.replica_id,
             view=request.view,
             start_seqno=request.start_seqno,
             end_seqno=request.end_seqno,
+        )
+
+    async def handle_fill_hole_response(self, response, sender):
+        start_seqno = response.ordered_requests[0].seqno if response.ordered_requests else None
+        end_seqno = response.ordered_requests[-1].seqno if response.ordered_requests else None
+        self.log_event(
+            "fill_hole_response_received",
+            sender=sender,
+            responder_id=response.responder_id,
+            view=response.view,
+            start_seqno=start_seqno,
+            end_seqno=end_seqno,
+            ordered_request_count=len(response.ordered_requests),
+        )
+
+        if response.view != self.proto.current_view or not response.ordered_requests:
+            self.log_event(
+                "fill_hole_response_ignored",
+                sender=sender,
+                responder_id=response.responder_id,
+                view=response.view,
+                reason="view_mismatch_or_empty",
+            )
+            return
+
+        cancelled = self.cancel_fill_hole_timer(
+            response.view,
+            response.ordered_requests[0].seqno,
+            response.ordered_requests[-1].seqno,
+        )
+        self.log_event(
+            "fill_hole_response_processed",
+            sender=sender,
+            responder_id=response.responder_id,
+            view=response.view,
+            start_seqno=response.ordered_requests[0].seqno,
+            end_seqno=response.ordered_requests[-1].seqno,
+            timer_cancelled=bool(cancelled),
         )
 
 
