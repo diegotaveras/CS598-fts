@@ -12,10 +12,15 @@ class PeerManager:
 
     def connect_all(self):
         for peer in self.peers:
-            channel = grpc.aio.insecure_channel(peer)
-            stub = network_pb2_grpc.NetworkServiceStub(channel)
-            self.channels[peer] = channel
-            self.stubs[peer] = stub
+            self._connect_peer(peer)
+
+    def _connect_peer(self, peer):
+        if peer in self.stubs:
+            return
+        channel = grpc.aio.insecure_channel(peer)
+        stub = network_pb2_grpc.NetworkServiceStub(channel)
+        self.channels[peer] = channel
+        self.stubs[peer] = stub
 
     async def close_all(self):
         for channel in self.channels.values():
@@ -23,6 +28,7 @@ class PeerManager:
 
     async def ping_peer(self, peer, timeout=2.0):
         try:
+            self._connect_peer(peer)
             reply = await self.stubs[peer].Ping(
                 network_pb2.PingRequest(sender=str(self.NODE_ID)),
                 timeout=timeout,
@@ -35,10 +41,8 @@ class PeerManager:
 
     async def send_message(self, peer, msg, timeout=3.0):
         try:
-            reply = await self.stubs[peer].SendMessage(
-                network_pb2.MessageRequest(sender=str(self.NODE_ID), msg=msg),
-                timeout=timeout,
-            )
+            self._connect_peer(peer)
+            reply = await self.stubs[peer].HandleProtocolMessage(msg, timeout=timeout)
             print(f"[{self.NODE_ID}] sent to {peer}: {reply.status}", flush=True)
             return True
         except Exception as e:

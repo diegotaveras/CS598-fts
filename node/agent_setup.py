@@ -1,6 +1,7 @@
 import os
 import asyncio
 import grpc
+from agent import agent_state, inference_client
 
 import agent_pb2
 import agent_pb2_grpc
@@ -9,11 +10,12 @@ from grpc_reflection.v1alpha import reflection
 NODE_ID = os.getenv("NODE_ID", "node")
 AGENT_SOCKET_PATH = os.getenv("AGENT_SOCKET_PATH", "/tmp/agent.sock")
 
+
 class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
-    def __init__(self, node_id: str, agent_state):
+    def __init__(self, node_id: str, client):
         self.node_id = str(node_id)
         self.ready = True
-        self.agent_state = agent_state
+        self.client = client
 
     async def HealthCheck(self, request, context):
         return agent_pb2.HealthReply(
@@ -27,31 +29,53 @@ class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
 
         print(f"[agent {self.node_id}] received task {task_id}: {payload}", flush=True)
 
-        result = f"processed: {payload}"
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": payload},
+        ]
+
+        result = await self.client.get_text(messages)
 
         return agent_pb2.TaskReply(
             task_id=task_id,
             status="ok",
             result=result,
         )
-    
 
-def agent_setup():
-    print(f"[{NODE_ID}]: Setting up agent")
-    # here we can actually load model and tools, return an agentstate for inference through the agent servicer
-    pass
+
+async def agent_setup():
+    print(f"[{NODE_ID}]: Setting up agent", flush=True)
+
+    backend = os.getenv("BACKEND", "openrouter")
+
+    if backend == "openrouter":
+        state = agent_state.AgentState(
+            backend=backend,
+            model_name="nvidia/nemotron-3-super-120b-a12b:free",
+            endpoint="https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPENROUTER_API_KEY", ""),
+            max_tokens=1024
+        )
+    else:
+        state = agent_state.AgentState(
+            backend="sglang",
+            model_name=os.getenv("MODEL_NAME", "default-model"),
+            endpoint=os.getenv("SGLANG_BASE_URL", "http://127.0.0.1:30000"),
+            api_key=None,
+        )
+
+    client = inference_client.InferenceClient(state)
+    return client
 
 
 async def serve():
+    client = await agent_setup()
 
-    agent_state = agent_setup()
-
-    # remove stale socket file if it exists
     if os.path.exists(AGENT_SOCKET_PATH):
         os.remove(AGENT_SOCKET_PATH)
 
     server = grpc.aio.server()
-    servicer = AgentServicer(NODE_ID, agent_state)
+    servicer = AgentServicer(NODE_ID, client)
 
     agent_pb2_grpc.add_AgentServiceServicer_to_server(servicer, server)
 

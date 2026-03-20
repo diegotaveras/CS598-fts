@@ -39,9 +39,9 @@ class NetworkServiceStub(object):
                 request_serializer=network__pb2.PingRequest.SerializeToString,
                 response_deserializer=network__pb2.PingReply.FromString,
                 _registered_method=True)
-        self.SendMessage = channel.unary_unary(
-                '/network.NetworkService/SendMessage',
-                request_serializer=network__pb2.MessageRequest.SerializeToString,
+        self.HandleProtocolMessage = channel.unary_unary(
+                '/network.NetworkService/HandleProtocolMessage',
+                request_serializer=network__pb2.ProtocolMessage.SerializeToString,
                 response_deserializer=network__pb2.MessageReply.FromString,
                 _registered_method=True)
 
@@ -55,7 +55,7 @@ class NetworkServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SendMessage(self, request, context):
+    def HandleProtocolMessage(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -69,9 +69,9 @@ def add_NetworkServiceServicer_to_server(servicer, server):
                     request_deserializer=network__pb2.PingRequest.FromString,
                     response_serializer=network__pb2.PingReply.SerializeToString,
             ),
-            'SendMessage': grpc.unary_unary_rpc_method_handler(
-                    servicer.SendMessage,
-                    request_deserializer=network__pb2.MessageRequest.FromString,
+            'HandleProtocolMessage': grpc.unary_unary_rpc_method_handler(
+                    servicer.HandleProtocolMessage,
+                    request_deserializer=network__pb2.ProtocolMessage.FromString,
                     response_serializer=network__pb2.MessageReply.SerializeToString,
             ),
     }
@@ -113,7 +113,7 @@ class NetworkService(object):
             _registered_method=True)
 
     @staticmethod
-    def SendMessage(request,
+    def HandleProtocolMessage(request,
             target,
             options=(),
             channel_credentials=None,
@@ -126,8 +126,8 @@ class NetworkService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/network.NetworkService/SendMessage',
-            network__pb2.MessageRequest.SerializeToString,
+            '/network.NetworkService/HandleProtocolMessage',
+            network__pb2.ProtocolMessage.SerializeToString,
             network__pb2.MessageReply.FromString,
             options,
             channel_credentials,

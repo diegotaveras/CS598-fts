@@ -4,7 +4,7 @@ package network;
 
 service NetworkService {
   rpc Ping(PingRequest) returns (PingReply);
-  rpc SendMessage(MessageRequest) returns (MessageReply);
+  rpc HandleProtocolMessage(ProtocolMessage) returns (MessageReply);
 }
 
 message PingRequest {
@@ -23,4 +23,43 @@ message MessageRequest {
 
 message MessageReply {
   string status = 1;
+}
+
+message ProtocolMessage {
+  string sender = 1;
+
+  oneof payload {
+    ClientRequest client_request = 2;
+    OrderedRequest ordered_request = 3;
+    SpeculativeReply speculative_reply = 4;
+  }
+}
+
+message ClientRequest {
+  string request_id = 1;
+  string client_id = 2;
+  string prompt = 3;
+  uint64 timestamp = 4;
+}
+
+message OrderedRequest {
+  ClientRequest client_request = 1;
+  int32 view = 2;
+  int32 seqno = 3;
+  string request_digest = 4;
+  string history_digest = 5;
+  string nondeterministic_data = 6;
+  string leader_id = 7;
+}
+
+message SpeculativeReply {
+  string request_id = 1;
+  string client_id = 2;
+  int32 view = 3;
+  int32 seqno = 4;
+  string history_digest = 5;
+  string result_digest = 6;
+  string replica_id = 7;
+  string result = 8;
+  OrderedRequest ordered_request = 9;
 }
