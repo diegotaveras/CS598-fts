@@ -7,7 +7,7 @@ import agent_pb2
 import agent_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 
-NODE_ID = os.getenv("NODE_ID", "node")
+NODE_ID = os.getenv("NODE_ID", "node1")
 AGENT_SOCKET_PATH = os.getenv("AGENT_SOCKET_PATH", "/tmp/agent.sock")
 
 

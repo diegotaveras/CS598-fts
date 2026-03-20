@@ -9,7 +9,7 @@ class ProtocolState:
         role: str = "replica",
         f: int = 1,
         current_view: int = 0,
-        primary_id = "1",
+        primary_id = "node1",
     ):
 
         self.node_id = str(node_id)
@@ -21,7 +21,8 @@ class ProtocolState:
         self.seqnum = 0
         self.history_digest = "GENESIS"
         self.ordered_history = []
-        self.primary_id = primary_id if primary_id is not None else "1"
+        self.ordered_requests_by_seq = {}
+        self.primary_id = primary_id if primary_id is not None else "node1"
 
     def allocate_seqno(self) -> int:
         self.seqnum += 1
@@ -40,4 +41,15 @@ class ProtocolState:
         self.seqnum = ordered_request.seqno
         self.history_digest = ordered_request.history_digest
         self.ordered_history.append(ordered_request)
+        self.ordered_requests_by_seq[ordered_request.seqno] = ordered_request
+
+    def get_ordered_request(self, seqno):
+        return self.ordered_requests_by_seq.get(seqno)
+
+    def get_ordered_requests_in_range(self, start_seqno: int, end_seqno: int):
+        return [
+            self.ordered_requests_by_seq[seqno]
+            for seqno in range(start_seqno, end_seqno + 1)
+            if seqno in self.ordered_requests_by_seq
+        ]
     

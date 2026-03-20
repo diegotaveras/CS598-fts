@@ -12,12 +12,12 @@ class Client:
         self.host = host
         self.port = int(port)
 
-        self.hostname = f"client{self.client_id}"
+        self.hostname = self.client_id
         self.self_addr = f"{self.hostname}:{self.port}"
         self.listen_addr = f"{self.host}:{self.port}"
 
         self.peer_manager = Peers.PeerManager(replicas, self.self_addr)
-        default_log_path = Path(__file__).resolve().parent / "logs" / f"client{self.client_id}.log"
+        default_log_path = Path(__file__).resolve().parent / "logs" / f"{self.client_id}.log"
         self.log_path = Path(log_path) if log_path else default_log_path
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -27,7 +27,7 @@ class Client:
             role="client",
             f=1,
             current_view=0,
-            primary_id="2",
+            primary_id="node2",
         )
 
     def log_event(self, event_type, **fields):

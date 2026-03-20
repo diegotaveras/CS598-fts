@@ -13,7 +13,7 @@ services:
       - "9001:9000"
     environment:
       ROLE: client
-      CLIENT_ID: 1
+      CLIENT_ID: client1
       CLIENT_PORT: 9000
       PRIMARY: node2:8000
       REPLICAS: node2:8000,node3:8000,node4:8000,node5:8000
@@ -31,7 +31,7 @@ services:
       ROLE: replica
       AGENT_SOCKET_PATH: /tmp/agent.sock
       PORT: 8000
-      NODE_ID: 2
+      NODE_ID: node2
       CLIENT_ADDR: node1:9000
       PEERS: node2:8000,node3:8000,node4:8000,node5:8000
 
@@ -48,7 +48,7 @@ services:
       ROLE: replica
       AGENT_SOCKET_PATH: /tmp/agent.sock
       PORT: 8000
-      NODE_ID: 3
+      NODE_ID: node3
       CLIENT_ADDR: node1:9000
       PEERS: node2:8000,node3:8000,node4:8000,node5:8000
 
@@ -65,7 +65,7 @@ services:
       ROLE: replica
       AGENT_SOCKET_PATH: /tmp/agent.sock
       PORT: 8000
-      NODE_ID: 4
+      NODE_ID: node4
       CLIENT_ADDR: node1:9000
       PEERS: node2:8000,node3:8000,node4:8000,node5:8000
 
@@ -82,6 +82,6 @@ services:
       ROLE: replica
       AGENT_SOCKET_PATH: /tmp/agent.sock
       PORT: 8000
-      NODE_ID: 5
+      NODE_ID: node5
       CLIENT_ADDR: node1:9000
       PEERS: node2:8000,node3:8000,node4:8000,node5:8000
