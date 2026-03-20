@@ -46,7 +46,8 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
             print(
                 f"[{NODE_ID}] received ordered_request from {request.sender}: "
                 f"request_id={orq.client_request.request_id} "
-                f"seqno={orq.seqno} digest={orq.request_digest[:12]}",
+                f"seqno={orq.seqno} digest={orq.request_digest[:12]} "
+                f"leader_result_digest={orq.leader_result_digest[:12]}",
                 flush=True,
             )
             self.node.log_event(
@@ -58,6 +59,7 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
                 view=orq.view,
                 request_digest=orq.request_digest,
                 history_digest=orq.history_digest,
+                leader_result_digest=orq.leader_result_digest,
             )
             asyncio.create_task(self.node.handle_ordered_request(orq, request.sender))
         elif request.HasField("fill_hole_request"):
