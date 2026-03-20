@@ -22,6 +22,7 @@ class Node:
         self.peer_manager = Peers.PeerManager(peers, self.self_addr)
         self.fill_hole_timeout_seconds = 1.0
         self.pending_fill_hole = None
+        self.local_client_results = {}
         default_log_path = Path(__file__).resolve().parent / "logs" / f"{self.node_id}.log"
         self.log_path = Path(log_path) if log_path else default_log_path
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,6 +105,9 @@ class Node:
         if request.history_digest != expected_history_digest:
             return False, "history digest does not match local history"
 
+        if self._digest_text(request.leader_result) != request.leader_result_digest:
+            return False, "leader result digest does not match leader result"
+
         return True, "accepted"
         
     async def process_prompt(self, prompt, sender):
@@ -153,12 +157,13 @@ class Node:
                 print(f"[{self.node_id}] could not establish contact with {peer}", flush=True)
                 self.log_event("handshake_failed", peer=peer)
 
-    async def multicast_prompt(self, request):
+    async def broadcast_ordered_request(self, request, leader_result):
         results = {}
         next_seqno = self.proto.seqnum + 1
         request_digest = self._digest_client_request(request)
         history_digest = self.proto.expected_history_digest(request_digest)
         nondeterministic_data = self._build_nondeterministic_data(request)
+        leader_result_digest = self._digest_text(leader_result)
         self.log_event(
             "ordered_request_created",
             request_id=request.request_id,
@@ -168,6 +173,7 @@ class Node:
             request_digest=request_digest,
             history_digest=history_digest,
             nondeterministic_data=nondeterministic_data,
+            leader_result_digest=leader_result_digest,
         )
 
         ordered_request = network_pb2.OrderedRequest(
@@ -183,6 +189,8 @@ class Node:
             history_digest=history_digest,
             nondeterministic_data=nondeterministic_data,
             leader_id=self.proto.primary_id,
+            leader_result=leader_result,
+            leader_result_digest=leader_result_digest,
         )
 
         local_task = asyncio.create_task(
@@ -254,7 +262,44 @@ class Node:
             prompt=request.prompt,
             timestamp=request.timestamp,
         )
-        asyncio.create_task(self.multicast_prompt(request))
+        local_result = await self.process_prompt(request.prompt, request.client_id)
+        if local_result is None:
+            self.log_event(
+                "client_request_local_execution_failed",
+                request_id=request.request_id,
+                client_id=request.client_id,
+            )
+            return
+
+        local_result_digest = self._digest_text(local_result)
+        self.local_client_results[request.request_id] = {
+            "request": request,
+            "result": local_result,
+            "result_digest": local_result_digest,
+        }
+        self.log_event(
+            "client_request_locally_processed",
+            request_id=request.request_id,
+            client_id=request.client_id,
+            result_digest=local_result_digest,
+        )
+
+        if self.node_id != self.proto.primary_id:
+            self.log_event(
+                "client_request_waiting_for_ordered_request",
+                request_id=request.request_id,
+                client_id=request.client_id,
+                primary_id=self.proto.primary_id,
+            )
+            return
+
+        self.log_event(
+            "client_request_accepted_by_primary",
+            request_id=request.request_id,
+            client_id=request.client_id,
+            leader_result_digest=local_result_digest,
+        )
+        asyncio.create_task(self.broadcast_ordered_request(request, local_result))
 
     async def handle_ordered_request(self, request, sender):
         self.log_event(
@@ -267,6 +312,7 @@ class Node:
             request_digest=request.request_digest,
             history_digest=request.history_digest,
             nondeterministic_data=request.nondeterministic_data,
+            leader_result_digest=request.leader_result_digest,
         )
         accepted, reason = self._validate_ordered_request(request, sender)
         if not accepted:
@@ -291,11 +337,28 @@ class Node:
             history_digest=request.history_digest,
         )
 
-        result = await self.process_prompt(request.client_request.prompt, sender)
-        if result is None:
-            return
+        cached_result = self.local_client_results.get(request.client_request.request_id)
+        if cached_result is not None:
+            result = cached_result["result"]
+            result_digest = cached_result["result_digest"]
+            self.log_event(
+                "ordered_request_using_cached_local_result",
+                request_id=request.client_request.request_id,
+                seqno=request.seqno,
+                result_digest=result_digest,
+            )
+        else:
+            result = await self.process_prompt(request.client_request.prompt, sender)
+            if result is None:
+                return
+            result_digest = self._digest_text(result)
+            self.log_event(
+                "ordered_request_computed_local_result",
+                request_id=request.client_request.request_id,
+                seqno=request.seqno,
+                result_digest=result_digest,
+            )
 
-        result_digest = self._digest_text(result)
         speculative_reply = network_pb2.SpeculativeReply(
             request_id=request.client_request.request_id,
             client_id=request.client_request.client_id,
