@@ -92,7 +92,7 @@ class Client:
         results = {}
 
         send_tasks = [
-            self.peer_manager.send_message(replica, msg)
+            self.send_request(replica, msg)
             for replica in self.peer_manager.peers
         ]
 

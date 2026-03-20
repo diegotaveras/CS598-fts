@@ -49,13 +49,18 @@ async def client_loop():
     await client.handshake_loop()
 
     print(
-        f"[client {CLIENT_ID}] sending request to primary {PRIMARY}: {TEST_PROMPT}",
+        f"[client {CLIENT_ID}] broadcasting request: {TEST_PROMPT}",
         flush=True,
     )
-    client.log_event("client_request_preparing", primary=PRIMARY, prompt=TEST_PROMPT)
+    client.log_event(
+        "client_request_preparing",
+        replicas=REPLICAS,
+        primary=PRIMARY,
+        prompt=TEST_PROMPT,
+    )
 
     msg = network_pb2.ProtocolMessage(
-        sender=client.self_addr,
+        sender=client.client_id,
         client_request=network_pb2.ClientRequest(
             request_id="0",
             client_id=str(CLIENT_ID),
@@ -64,14 +69,28 @@ async def client_loop():
         ),
     )
     
-    ok = await client.send_request(PRIMARY, msg)
+    results = await client.broadcast_request(msg)
+    sent_count = sum(1 for ok in results.values() if ok)
+    failed_replicas = [replica for replica, ok in results.items() if not ok]
 
-    if not ok:
-        print(f"[client {CLIENT_ID}] failed to send request to primary", flush=True)
-        client.log_event("client_request_failed", primary=PRIMARY)
+    if sent_count == 0:
+        print(f"[client {CLIENT_ID}] failed to broadcast request to any replica", flush=True)
+        client.log_event(
+            "client_request_failed",
+            replicas=REPLICAS,
+            failed_replicas=failed_replicas,
+        )
     else:
-        print(f"[client {CLIENT_ID}] request sent to primary", flush=True)
-        client.log_event("client_request_dispatched", primary=PRIMARY)
+        print(
+            f"[client {CLIENT_ID}] request sent to {sent_count}/{len(REPLICAS)} replicas",
+            flush=True,
+        )
+        client.log_event(
+            "client_request_dispatched",
+            replicas=REPLICAS,
+            sent_count=sent_count,
+            failed_replicas=failed_replicas,
+        )
 
 
 async def serve():
