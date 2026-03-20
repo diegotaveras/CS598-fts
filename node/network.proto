@@ -52,6 +52,8 @@ message OrderedRequest {
   string history_digest = 5;
   string nondeterministic_data = 6;
   string leader_id = 7;
+  string leader_result = 8;
+  string leader_result_digest = 9;
 }
 
 message SpeculativeReply {
