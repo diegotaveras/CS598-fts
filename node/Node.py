@@ -22,6 +22,7 @@ class Node:
         self.peer_manager = Peers.PeerManager(peers, self.self_addr)
         self.fill_hole_timeout_seconds = 1.0
         self.pending_fill_hole = None
+        self.local_client_tasks = {}
         self.local_client_results = {}
         default_log_path = Path(__file__).resolve().parent / "logs" / f"{self.node_id}.log"
         self.log_path = Path(log_path) if log_path else default_log_path
@@ -140,6 +141,42 @@ class Node:
                 error=str(e),
             )
             return None
+
+    async def _run_client_request_execution(self, request):
+        local_result = await self.process_prompt(request.prompt, request.client_id)
+        if local_result is None:
+            self.log_event(
+                "client_request_local_execution_failed",
+                request_id=request.request_id,
+                client_id=request.client_id,
+            )
+            return None
+
+        local_result_digest = self._digest_text(local_result)
+        self.local_client_results[request.request_id] = {
+            "request": request,
+            "result": local_result,
+            "result_digest": local_result_digest,
+        }
+        self.log_event(
+            "client_request_locally_processed",
+            request_id=request.request_id,
+            client_id=request.client_id,
+            result_digest=local_result_digest,
+        )
+        return self.local_client_results[request.request_id]
+
+    def _ensure_client_request_execution(self, request):
+        task = self.local_client_tasks.get(request.request_id)
+        if task is None or task.done():
+            task = asyncio.create_task(self._run_client_request_execution(request))
+            self.local_client_tasks[request.request_id] = task
+            self.log_event(
+                "client_request_local_execution_started",
+                request_id=request.request_id,
+                client_id=request.client_id,
+            )
+        return task
 
     async def handshake_loop(self):
         await asyncio.sleep(2)
@@ -262,27 +299,9 @@ class Node:
             prompt=request.prompt,
             timestamp=request.timestamp,
         )
-        local_result = await self.process_prompt(request.prompt, request.client_id)
-        if local_result is None:
-            self.log_event(
-                "client_request_local_execution_failed",
-                request_id=request.request_id,
-                client_id=request.client_id,
-            )
+        local_result_record = await self._ensure_client_request_execution(request)
+        if local_result_record is None:
             return
-
-        local_result_digest = self._digest_text(local_result)
-        self.local_client_results[request.request_id] = {
-            "request": request,
-            "result": local_result,
-            "result_digest": local_result_digest,
-        }
-        self.log_event(
-            "client_request_locally_processed",
-            request_id=request.request_id,
-            client_id=request.client_id,
-            result_digest=local_result_digest,
-        )
 
         if self.node_id != self.proto.primary_id:
             self.log_event(
@@ -297,9 +316,9 @@ class Node:
             "client_request_accepted_by_primary",
             request_id=request.request_id,
             client_id=request.client_id,
-            leader_result_digest=local_result_digest,
+            leader_result_digest=local_result_record["result_digest"],
         )
-        asyncio.create_task(self.broadcast_ordered_request(request, local_result))
+        asyncio.create_task(self.broadcast_ordered_request(request, local_result_record["result"]))
 
     async def handle_ordered_request(self, request, sender):
         self.log_event(
@@ -348,16 +367,36 @@ class Node:
                 result_digest=result_digest,
             )
         else:
-            result = await self.process_prompt(request.client_request.prompt, sender)
-            if result is None:
-                return
-            result_digest = self._digest_text(result)
-            self.log_event(
-                "ordered_request_computed_local_result",
-                request_id=request.client_request.request_id,
-                seqno=request.seqno,
-                result_digest=result_digest,
-            )
+            task = self.local_client_tasks.get(request.client_request.request_id)
+            if task is not None:
+                self.log_event(
+                    "ordered_request_waiting_for_local_result",
+                    request_id=request.client_request.request_id,
+                    seqno=request.seqno,
+                )
+                cached_result = await task
+                if cached_result is not None:
+                    result = cached_result["result"]
+                    result_digest = cached_result["result_digest"]
+                    self.log_event(
+                        "ordered_request_using_awaited_local_result",
+                        request_id=request.client_request.request_id,
+                        seqno=request.seqno,
+                        result_digest=result_digest,
+                    )
+                else:
+                    return
+            else:
+                result = await self.process_prompt(request.client_request.prompt, sender)
+                if result is None:
+                    return
+                result_digest = self._digest_text(result)
+                self.log_event(
+                    "ordered_request_computed_local_result",
+                    request_id=request.client_request.request_id,
+                    seqno=request.seqno,
+                    result_digest=result_digest,
+                )
 
         speculative_reply = network_pb2.SpeculativeReply(
             request_id=request.client_request.request_id,
