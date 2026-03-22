@@ -84,6 +84,9 @@ class Client:
             history_digest=reply.history_digest,
             result_digest=reply.result_digest,
             replica_id=reply.replica_id,
+            vote_decision=reply.vote_decision,
+            leader_result_digest=reply.leader_result_digest,
+            judge_reason=reply.judge_reason,
             ordered_request_seqno=reply.ordered_request.seqno if reply.HasField("ordered_request") else None,
             result=reply.result,
         )

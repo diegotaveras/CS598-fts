@@ -78,6 +78,54 @@ class Node:
     def _sender_matches_primary(self, sender, leader_id):
         return sender == str(leader_id)
 
+    def _build_agreement_prompt(self, ordered_request, local_result):
+        return json.dumps(
+            {
+                "instruction": (
+                    "You are evaluating whether to agree with a leader replica's proposed "
+                    "answer. Return exactly one JSON object with keys "
+                    '"vote" and "reason". "vote" must be either "agree" or "disagree".'
+                ),
+                "request": {
+                    "request_id": ordered_request.client_request.request_id,
+                    "client_id": ordered_request.client_request.client_id,
+                    "prompt": ordered_request.client_request.prompt,
+                    "view": ordered_request.view,
+                    "seqno": ordered_request.seqno,
+                },
+                "leader_result": {
+                    "text": ordered_request.leader_result,
+                    "digest": ordered_request.leader_result_digest,
+                },
+                "local_result": {
+                    "text": local_result,
+                },
+            },
+            sort_keys=True,
+        )
+
+    def _parse_vote_decision(self, text):
+        if not text:
+            return network_pb2.VOTE_DECISION_DISAGREE, "judge returned empty response"
+
+        try:
+            payload = json.loads(text)
+            vote = str(payload.get("vote", "")).strip().lower()
+            reason = str(payload.get("reason", "")).strip()
+        except json.JSONDecodeError:
+            normalized = text.strip().lower()
+            if "disagree" in normalized:
+                return network_pb2.VOTE_DECISION_DISAGREE, text.strip()
+            if "agree" in normalized:
+                return network_pb2.VOTE_DECISION_AGREE, text.strip()
+            return network_pb2.VOTE_DECISION_DISAGREE, text.strip()
+
+        if vote == "agree":
+            return network_pb2.VOTE_DECISION_AGREE, reason
+        if vote == "disagree":
+            return network_pb2.VOTE_DECISION_DISAGREE, reason
+        return network_pb2.VOTE_DECISION_DISAGREE, reason or "judge returned invalid vote"
+
     def _address_for_replica_id(self, replica_id):
         if self.node_id == replica_id:
             return self.self_addr
@@ -141,6 +189,30 @@ class Node:
                 error=str(e),
             )
             return None
+
+    async def judge_leader_result(self, ordered_request, local_result, local_result_digest):
+        if local_result_digest == ordered_request.leader_result_digest:
+            return network_pb2.VOTE_DECISION_AGREE, "local result digest matches leader result digest"
+
+        if self.node_id == ordered_request.leader_id:
+            return network_pb2.VOTE_DECISION_AGREE, "leader endorses its own ordered result"
+
+        judge_prompt = self._build_agreement_prompt(ordered_request, local_result)
+        agent_reply = await self.agent_manager.run_task(
+            agent_id="local_agent",
+            task_id=f"judge-{ordered_request.client_request.request_id}-{self.node_id}",
+            payload=judge_prompt,
+        )
+        judge_result = agent_reply.result if agent_reply is not None else ""
+        vote_decision, judge_reason = self._parse_vote_decision(judge_result)
+        self.log_event(
+            "leader_result_judged",
+            request_id=ordered_request.client_request.request_id,
+            seqno=ordered_request.seqno,
+            vote_decision=network_pb2.VoteDecision.Name(vote_decision),
+            judge_reason=judge_reason,
+        )
+        return vote_decision, judge_reason
 
     async def _run_client_request_execution(self, request):
         local_result = await self.process_prompt(request.prompt, request.client_id)
@@ -408,7 +480,17 @@ class Node:
             replica_id=self.node_id,
             result=result,
             ordered_request=request,
+            vote_decision=network_pb2.VOTE_DECISION_UNSPECIFIED,
+            leader_result_digest=request.leader_result_digest,
+            judge_reason="",
         )
+        vote_decision, judge_reason = await self.judge_leader_result(
+            request,
+            result,
+            result_digest,
+        )
+        speculative_reply.vote_decision = vote_decision
+        speculative_reply.judge_reason = judge_reason
         self.log_event(
             "speculative_reply_created",
             request_id=speculative_reply.request_id,
@@ -418,6 +500,8 @@ class Node:
             history_digest=speculative_reply.history_digest,
             result_digest=speculative_reply.result_digest,
             replica_id=speculative_reply.replica_id,
+            vote_decision=network_pb2.VoteDecision.Name(speculative_reply.vote_decision),
+            leader_result_digest=speculative_reply.leader_result_digest,
         )
         await self.send_speculative_reply(speculative_reply)
 
