@@ -24,13 +24,15 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rnetwork.proto\x12\x07network\"\x1d\n\x0bPingRequest\x12\x0e\n\x06sender\x18\x01 \x01(\t\",\n\tPingReply\x12\x0f\n\x07node_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\"-\n\x0eMessageRequest\x12\x0e\n\x06sender\x18\x01 \x01(\t\x12\x0b\n\x03msg\x18\x02 \x01(\t\"\x1e\n\x0cMessageReply\x12\x0e\n\x06status\x18\x01 \x01(\t\"\xba\x02\n\x0fProtocolMessage\x12\x0e\n\x06sender\x18\x01 \x01(\t\x12\x30\n\x0e\x63lient_request\x18\x02 \x01(\x0b\x32\x16.network.ClientRequestH\x00\x12\x32\n\x0fordered_request\x18\x03 \x01(\x0b\x32\x17.network.OrderedRequestH\x00\x12\x36\n\x11speculative_reply\x18\x04 \x01(\x0b\x32\x19.network.SpeculativeReplyH\x00\x12\x35\n\x11\x66ill_hole_request\x18\x05 \x01(\x0b\x32\x18.network.FillHoleRequestH\x00\x12\x37\n\x12\x66ill_hole_response\x18\x06 \x01(\x0b\x32\x19.network.FillHoleResponseH\x00\x42\t\n\x07payload\"Y\n\rClientRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\x12\x11\n\ttimestamp\x18\x04 \x01(\x04\"\xf4\x01\n\x0eOrderedRequest\x12.\n\x0e\x63lient_request\x18\x01 \x01(\x0b\x32\x16.network.ClientRequest\x12\x0c\n\x04view\x18\x02 \x01(\x05\x12\r\n\x05seqno\x18\x03 \x01(\x05\x12\x16\n\x0erequest_digest\x18\x04 \x01(\t\x12\x16\n\x0ehistory_digest\x18\x05 \x01(\t\x12\x1d\n\x15nondeterministic_data\x18\x06 \x01(\t\x12\x11\n\tleader_id\x18\x07 \x01(\t\x12\x15\n\rleader_result\x18\x08 \x01(\t\x12\x1c\n\x14leader_result_digest\x18\t \x01(\t\"\xdb\x01\n\x10SpeculativeReply\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0c\n\x04view\x18\x03 \x01(\x05\x12\r\n\x05seqno\x18\x04 \x01(\x05\x12\x16\n\x0ehistory_digest\x18\x05 \x01(\t\x12\x15\n\rresult_digest\x18\x06 \x01(\t\x12\x12\n\nreplica_id\x18\x07 \x01(\t\x12\x0e\n\x06result\x18\x08 \x01(\t\x12\x30\n\x0fordered_request\x18\t \x01(\x0b\x32\x17.network.OrderedRequest\"[\n\x0f\x46illHoleRequest\x12\x0c\n\x04view\x18\x01 \x01(\x05\x12\x13\n\x0bstart_seqno\x18\x02 \x01(\x05\x12\x11\n\tend_seqno\x18\x03 \x01(\x05\x12\x12\n\nreplica_id\x18\x04 \x01(\t\"i\n\x10\x46illHoleResponse\x12\x0c\n\x04view\x18\x01 \x01(\x05\x12\x14\n\x0cresponder_id\x18\x02 \x01(\t\x12\x31\n\x10ordered_requests\x18\x03 \x03(\x0b\x32\x17.network.OrderedRequest2\x8c\x01\n\x0eNetworkService\x12\x30\n\x04Ping\x12\x14.network.PingRequest\x1a\x12.network.PingReply\x12H\n\x15HandleProtocolMessage\x12\x18.network.ProtocolMessage\x1a\x15.network.MessageReplyb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rnetwork.proto\x12\x07network\"\x1d\n\x0bPingRequest\x12\x0e\n\x06sender\x18\x01 \x01(\t\",\n\tPingReply\x12\x0f\n\x07node_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\"-\n\x0eMessageRequest\x12\x0e\n\x06sender\x18\x01 \x01(\t\x12\x0b\n\x03msg\x18\x02 \x01(\t\"\x1e\n\x0cMessageReply\x12\x0e\n\x06status\x18\x01 \x01(\t\"\xba\x02\n\x0fProtocolMessage\x12\x0e\n\x06sender\x18\x01 \x01(\t\x12\x30\n\x0e\x63lient_request\x18\x02 \x01(\x0b\x32\x16.network.ClientRequestH\x00\x12\x32\n\x0fordered_request\x18\x03 \x01(\x0b\x32\x17.network.OrderedRequestH\x00\x12\x36\n\x11speculative_reply\x18\x04 \x01(\x0b\x32\x19.network.SpeculativeReplyH\x00\x12\x35\n\x11\x66ill_hole_request\x18\x05 \x01(\x0b\x32\x18.network.FillHoleRequestH\x00\x12\x37\n\x12\x66ill_hole_response\x18\x06 \x01(\x0b\x32\x19.network.FillHoleResponseH\x00\x42\t\n\x07payload\"Y\n\rClientRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\x12\x11\n\ttimestamp\x18\x04 \x01(\x04\"\xf4\x01\n\x0eOrderedRequest\x12.\n\x0e\x63lient_request\x18\x01 \x01(\x0b\x32\x16.network.ClientRequest\x12\x0c\n\x04view\x18\x02 \x01(\x05\x12\r\n\x05seqno\x18\x03 \x01(\x05\x12\x16\n\x0erequest_digest\x18\x04 \x01(\t\x12\x16\n\x0ehistory_digest\x18\x05 \x01(\t\x12\x1d\n\x15nondeterministic_data\x18\x06 \x01(\t\x12\x11\n\tleader_id\x18\x07 \x01(\t\x12\x15\n\rleader_result\x18\x08 \x01(\t\x12\x1c\n\x14leader_result_digest\x18\t \x01(\t\"\xbd\x02\n\x10SpeculativeReply\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0c\n\x04view\x18\x03 \x01(\x05\x12\r\n\x05seqno\x18\x04 \x01(\x05\x12\x16\n\x0ehistory_digest\x18\x05 \x01(\t\x12\x15\n\rresult_digest\x18\x06 \x01(\t\x12\x12\n\nreplica_id\x18\x07 \x01(\t\x12\x0e\n\x06result\x18\x08 \x01(\t\x12\x30\n\x0fordered_request\x18\t \x01(\x0b\x32\x17.network.OrderedRequest\x12,\n\rvote_decision\x18\n \x01(\x0e\x32\x15.network.VoteDecision\x12\x1c\n\x14leader_result_digest\x18\x0b \x01(\t\x12\x14\n\x0cjudge_reason\x18\x0c \x01(\t\"[\n\x0f\x46illHoleRequest\x12\x0c\n\x04view\x18\x01 \x01(\x05\x12\x13\n\x0bstart_seqno\x18\x02 \x01(\x05\x12\x11\n\tend_seqno\x18\x03 \x01(\x05\x12\x12\n\nreplica_id\x18\x04 \x01(\t\"i\n\x10\x46illHoleResponse\x12\x0c\n\x04view\x18\x01 \x01(\x05\x12\x14\n\x0cresponder_id\x18\x02 \x01(\t\x12\x31\n\x10ordered_requests\x18\x03 \x03(\x0b\x32\x17.network.OrderedRequest*b\n\x0cVoteDecision\x12\x1d\n\x19VOTE_DECISION_UNSPECIFIED\x10\x00\x12\x17\n\x13VOTE_DECISION_AGREE\x10\x01\x12\x1a\n\x16VOTE_DECISION_DISAGREE\x10\x02\x32\x8c\x01\n\x0eNetworkService\x12\x30\n\x04Ping\x12\x14.network.PingRequest\x1a\x12.network.PingReply\x12H\n\x15HandleProtocolMessage\x12\x18.network.ProtocolMessage\x1a\x15.network.MessageReplyb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'network_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
+  _globals['_VOTEDECISION']._serialized_start=1357
+  _globals['_VOTEDECISION']._serialized_end=1455
   _globals['_PINGREQUEST']._serialized_start=26
   _globals['_PINGREQUEST']._serialized_end=55
   _globals['_PINGREPLY']._serialized_start=57
@@ -46,11 +48,11 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_ORDEREDREQUEST']._serialized_start=591
   _globals['_ORDEREDREQUEST']._serialized_end=835
   _globals['_SPECULATIVEREPLY']._serialized_start=838
-  _globals['_SPECULATIVEREPLY']._serialized_end=1057
-  _globals['_FILLHOLEREQUEST']._serialized_start=1059
-  _globals['_FILLHOLEREQUEST']._serialized_end=1150
-  _globals['_FILLHOLERESPONSE']._serialized_start=1152
-  _globals['_FILLHOLERESPONSE']._serialized_end=1257
-  _globals['_NETWORKSERVICE']._serialized_start=1260
-  _globals['_NETWORKSERVICE']._serialized_end=1400
+  _globals['_SPECULATIVEREPLY']._serialized_end=1155
+  _globals['_FILLHOLEREQUEST']._serialized_start=1157
+  _globals['_FILLHOLEREQUEST']._serialized_end=1248
+  _globals['_FILLHOLERESPONSE']._serialized_start=1250
+  _globals['_FILLHOLERESPONSE']._serialized_end=1355
+  _globals['_NETWORKSERVICE']._serialized_start=1458
+  _globals['_NETWORKSERVICE']._serialized_end=1598
 # @@protoc_insertion_point(module_scope)

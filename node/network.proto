@@ -56,6 +56,12 @@ message OrderedRequest {
   string leader_result_digest = 9;
 }
 
+enum VoteDecision {
+  VOTE_DECISION_UNSPECIFIED = 0;
+  VOTE_DECISION_AGREE = 1;
+  VOTE_DECISION_DISAGREE = 2;
+}
+
 message SpeculativeReply {
   string request_id = 1;
   string client_id = 2;
@@ -66,6 +72,9 @@ message SpeculativeReply {
   string replica_id = 7;
   string result = 8;
   OrderedRequest ordered_request = 9;
+  VoteDecision vote_decision = 10;
+  string leader_result_digest = 11;
+  string judge_reason = 12;
 }
 
 message FillHoleRequest {
