@@ -33,7 +33,7 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
             sr = request.speculative_reply
             print(
                 f"[client {CLIENT_ID}] received speculative_reply from {request.sender}: "
-                f"request_id={sr.request_id} seqno={sr.seqno} replica={sr.replica_id}",
+                f"request_id={sr.request_id} seqno={sr.seqno} replica={sr.replica_id} vote={sr.vote_decision}",
                 flush=True,
             )
             await self.client.handle_speculative_reply(sr, sender=request.sender)
