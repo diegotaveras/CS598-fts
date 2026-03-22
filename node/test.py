@@ -61,6 +61,15 @@ async def fake_send_speculative_reply(self, reply):
     return True
 
 
+async def slow_fake_process_prompt(self, prompt, sender):
+    await asyncio.sleep(0.02)
+    return f"processed:{prompt}:{sender}"
+
+
+async def fake_judge_leader_result(self, ordered_request, local_result, local_result_digest):
+    return network_pb2.VOTE_DECISION_AGREE, "test-agree"
+
+
 class FillHoleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -125,6 +134,8 @@ class FillHoleTests(unittest.IsolatedAsyncioTestCase):
                 history_digest="history-2",
                 nondeterministic_data="{}",
                 leader_id="node2",
+                leader_result="leader-result",
+                leader_result_digest=node._digest_text("leader-result"),
             )
         )
 
@@ -196,6 +207,7 @@ class FillHoleTests(unittest.IsolatedAsyncioTestCase):
         node.fill_hole_timeout_seconds = 1.0
         node.process_prompt = fake_process_prompt.__get__(node, Node.Node)
         node.send_speculative_reply = fake_send_speculative_reply.__get__(node, Node.Node)
+        node.judge_leader_result = fake_judge_leader_result.__get__(node, Node.Node)
 
         await node.request_fill_hole(2, 4)
         self.assertIsNotNone(node.pending_fill_hole)
@@ -217,6 +229,8 @@ class FillHoleTests(unittest.IsolatedAsyncioTestCase):
                     history_digest=node.proto.expected_history_digest("digest-2"),
                     nondeterministic_data="{}",
                     leader_id="node2",
+                    leader_result="leader-result",
+                    leader_result_digest=node._digest_text("leader-result"),
                 ),
             ],
         )
@@ -246,6 +260,8 @@ class FillHoleTests(unittest.IsolatedAsyncioTestCase):
             history_digest="history-2",
             nondeterministic_data="{}",
             leader_id="node2",
+            leader_result="leader-result",
+            leader_result_digest=node._digest_text("leader-result"),
         )
         node.proto.append_ordered_request(ordered_request)
 
@@ -274,6 +290,7 @@ class FillHoleTests(unittest.IsolatedAsyncioTestCase):
         node.fill_hole_timeout_seconds = 1.0
         node.process_prompt = fake_process_prompt.__get__(node, Node.Node)
         node.send_speculative_reply = fake_send_speculative_reply.__get__(node, Node.Node)
+        node.judge_leader_result = fake_judge_leader_result.__get__(node, Node.Node)
 
         await node.request_fill_hole(1, 1)
 
@@ -291,6 +308,8 @@ class FillHoleTests(unittest.IsolatedAsyncioTestCase):
                     history_digest=node.proto.expected_history_digest(request_digest),
                     nondeterministic_data="{}",
                     leader_id="node2",
+                    leader_result="leader-result",
+                    leader_result_digest=node._digest_text("leader-result"),
                 ),
             ],
         )
@@ -322,6 +341,84 @@ class FillHoleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(event["event"] == "fill_hole_request_already_pending" for event in events))
 
         node.cancel_fill_hole_timer(0, 2, 4)
+
+    async def test_non_primary_processes_broadcast_client_request(self):
+        node = make_node("node4", "client_request_non_primary.log")
+        if node.log_path.exists():
+            node.log_path.unlink()
+
+        node.process_prompt = fake_process_prompt.__get__(node, Node.Node)
+        request = make_client_request("req-client")
+
+        await node.handle_client_request(request)
+
+        events = read_events(node.log_path)
+        self.assertEqual(events[0]["event"], "client_request_received")
+        self.assertEqual(events[1]["event"], "client_request_local_execution_started")
+        self.assertEqual(events[2]["event"], "client_request_locally_processed")
+        self.assertEqual(events[3]["event"], "client_request_waiting_for_ordered_request")
+        self.assertIn("req-client", node.local_client_results)
+
+    async def test_primary_accepts_broadcast_client_request(self):
+        node = make_node("node2", "client_request_primary.log")
+        if node.log_path.exists():
+            node.log_path.unlink()
+
+        async def fake_broadcast_ordered_request(request, leader_result):
+            node.log_event(
+                "broadcast_ordered_request_invoked",
+                request_id=request.request_id,
+                client_id=request.client_id,
+                leader_result=leader_result,
+            )
+            return {}
+
+        node.process_prompt = fake_process_prompt.__get__(node, Node.Node)
+        node.broadcast_ordered_request = fake_broadcast_ordered_request
+        request = make_client_request("req-client")
+
+        await node.handle_client_request(request)
+        await asyncio.sleep(0)
+
+        events = read_events(node.log_path)
+        self.assertEqual(events[0]["event"], "client_request_received")
+        self.assertEqual(events[1]["event"], "client_request_local_execution_started")
+        self.assertEqual(events[2]["event"], "client_request_locally_processed")
+        self.assertEqual(events[3]["event"], "client_request_accepted_by_primary")
+        self.assertEqual(events[4]["event"], "broadcast_ordered_request_invoked")
+
+    async def test_ordered_request_waits_for_inflight_local_execution(self):
+        node = make_node("node4", "ordered_request_waits_for_local.log")
+        if node.log_path.exists():
+            node.log_path.unlink()
+
+        node.process_prompt = slow_fake_process_prompt.__get__(node, Node.Node)
+        node.send_speculative_reply = fake_send_speculative_reply.__get__(node, Node.Node)
+        node.judge_leader_result = fake_judge_leader_result.__get__(node, Node.Node)
+
+        request = make_client_request("req-race")
+        client_task = asyncio.create_task(node.handle_client_request(request))
+        await asyncio.sleep(0)
+
+        request_digest = node._digest_client_request(request)
+        ordered_request = network_pb2.OrderedRequest(
+            client_request=request,
+            view=0,
+            seqno=1,
+            request_digest=request_digest,
+            history_digest=node.proto.expected_history_digest(request_digest),
+            nondeterministic_data="{}",
+            leader_id="node2",
+            leader_result="leader-result",
+            leader_result_digest=node._digest_text("leader-result"),
+        )
+
+        await node.handle_ordered_request(ordered_request, sender="node2")
+        await client_task
+
+        events = read_events(node.log_path)
+        self.assertTrue(any(event["event"] == "ordered_request_waiting_for_local_result" for event in events))
+        self.assertTrue(any(event["event"] == "ordered_request_using_awaited_local_result" for event in events))
 
 
 if __name__ == "__main__":
