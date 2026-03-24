@@ -34,10 +34,10 @@ class InferenceClient:
             "messages": messages,
             "temperature": self.state.temperature,
             "max_tokens": self.state.max_tokens,
-            "reasoning": {
-                "effort": "none"
-            }
         }
+
+        if self.state.backend == "openrouter":
+            payload["reasoning"] = {"effort": "none"}
 
         payload.update(overrides)
         return payload

@@ -1,0 +1,31 @@
+# ─── Node Role ───────────────────────────────────────────────
+ROLE=replica                  # "client" or "replica"
+NODE_ID=node2                 # Unique node identifier
+
+# ─── Network ────────────────────────────────────────────────
+HOST=0.0.0.0                  # Bind address
+PORT=8000                     # Listen port for replicas
+CLIENT_PORT=9000              # Listen port for the client node
+PEERS=node2:8000,node3:8000,node4:8000,node5:8000
+CLIENT_ADDR=node1:9000        # Address replicas use to reach the client
+SELF_ADDR=                    # Override self address (default: NODE_ID:PORT)
+PRIMARY=node2:8000            # Primary replica address (client only)
+REPLICAS=node2:8000,node3:8000,node4:8000,node5:8000  # All replicas (client only)
+CLIENT_ID=client1             # Client identifier (client only)
+
+# ─── Agent / Inference ──────────────────────────────────────
+AGENT_SOCKET_PATH=/tmp/agent.sock   # Unix socket for agent gRPC
+BACKEND=openrouter                  # "openrouter" or "sglang"
+
+# OpenRouter settings (BACKEND=openrouter)
+OPENROUTER_API_KEY=                 # Required for openrouter backend
+
+# sglang settings (BACKEND=sglang)
+MODEL_NAME=qwen/qwen2.5-0.5b-instruct   # Model path for sglang
+SGLANG_BASE_URL=http://127.0.0.1:30000  # sglang server endpoint
+SGLANG_PORT=30000                        # Port for sglang server (used by start.sh)
+
+# ─── Misc ───────────────────────────────────────────────────
+RESET_LOGS=                   # Set to "1" to clear logs on startup
+LOG_PATH=                     # Custom log file path (optional)
+TEST_PROMPT=explain RAFT consensus protocol  # Default prompt (client only)

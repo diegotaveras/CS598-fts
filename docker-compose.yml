@@ -23,6 +23,7 @@ services:
     env_file:
       - .env
     container_name: node2
+    ipc: host
     volumes:
       - .:/app
     ports:
@@ -34,12 +35,22 @@ services:
       NODE_ID: node2
       CLIENT_ADDR: node1:9000
       PEERS: node2:8000,node3:8000,node4:8000,node5:8000
+      MODEL_NAME: qwen/qwen2.5-0.5b-instruct
+      SGLANG_BASE_URL: http://127.0.0.1:30000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
 
   node3:
     build: .
     env_file:
       - .env
     container_name: node3
+    ipc: host
     volumes:
       - .:/app
     ports:
@@ -51,12 +62,22 @@ services:
       NODE_ID: node3
       CLIENT_ADDR: node1:9000
       PEERS: node2:8000,node3:8000,node4:8000,node5:8000
+      MODEL_NAME: qwen/qwen2.5-0.5b-instruct
+      SGLANG_BASE_URL: http://127.0.0.1:30000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
 
   node4:
     build: .
     env_file:
       - .env
     container_name: node4
+    ipc: host
     volumes:
       - .:/app
     ports:
@@ -68,12 +89,22 @@ services:
       NODE_ID: node4
       CLIENT_ADDR: node1:9000
       PEERS: node2:8000,node3:8000,node4:8000,node5:8000
+      MODEL_NAME: qwen/qwen2.5-0.5b-instruct
+      SGLANG_BASE_URL: http://127.0.0.1:30000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["2"]
+              capabilities: [gpu]
 
   node5:
     build: .
     env_file:
       - .env
     container_name: node5
+    ipc: host
     volumes:
       - .:/app
     ports:
@@ -85,3 +116,12 @@ services:
       NODE_ID: node5
       CLIENT_ADDR: node1:9000
       PEERS: node2:8000,node3:8000,node4:8000,node5:8000
+      MODEL_NAME: qwen/qwen2.5-0.5b-instruct
+      SGLANG_BASE_URL: http://127.0.0.1:30000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["3"]
+              capabilities: [gpu]

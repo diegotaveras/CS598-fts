@@ -59,7 +59,7 @@ async def agent_setup():
     else:
         state = agent_state.AgentState(
             backend="sglang",
-            model_name=os.getenv("MODEL_NAME", "default-model"),
+            model_name=os.getenv("MODEL_NAME", "qwen/qwen2.5-0.5b-instruct"),
             endpoint=os.getenv("SGLANG_BASE_URL", "http://127.0.0.1:30000"),
             api_key=None,
         )
