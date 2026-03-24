@@ -18,3 +18,8 @@ Or clear them automatically on startup:
 ```bash
 RESET_LOGS=1 docker compose up --build
 ```
+
+Unit tests:
+```bash
+python -m unittest node/test.py
+```

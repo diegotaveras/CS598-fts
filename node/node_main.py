@@ -10,9 +10,9 @@ NODE_ID = os.getenv("NODE_ID", "node")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 PEERS = os.getenv("PEERS", "").split(",") if os.getenv("PEERS") else []
-SELF_ADDR = os.getenv("SELF_ADDR", f"node{NODE_ID}:{PORT}")
+SELF_ADDR = os.getenv("SELF_ADDR", f"{NODE_ID}:{PORT}")
 AGENT_SOCKET_PATH = os.getenv("AGENT_SOCKET_PATH", "/tmp/agent.sock")
-CLIENT_ADDR = os.getenv("CLIENT_ADDR", "1")
+CLIENT_ADDR = os.getenv("CLIENT_ADDR", "node1:9000")
 LOG_PATH = os.getenv("LOG_PATH")
 
 class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
@@ -60,6 +60,37 @@ class NetworkServicer(network_pb2_grpc.NetworkServiceServicer):
                 history_digest=orq.history_digest,
             )
             asyncio.create_task(self.node.handle_ordered_request(orq, request.sender))
+        elif request.HasField("fill_hole_request"):
+            fhr = request.fill_hole_request
+            print(
+                f"[{NODE_ID}] received fill_hole_request from {request.sender}: "
+                f"replica_id={fhr.replica_id} start={fhr.start_seqno} end={fhr.end_seqno}",
+                flush=True,
+            )
+            self.node.log_event(
+                "fill_hole_request_rpc_received",
+                sender=request.sender,
+                replica_id=fhr.replica_id,
+                view=fhr.view,
+                start_seqno=fhr.start_seqno,
+                end_seqno=fhr.end_seqno,
+            )
+            asyncio.create_task(self.node.handle_fill_hole_request(fhr, request.sender))
+        elif request.HasField("fill_hole_response"):
+            fhs = request.fill_hole_response
+            print(
+                f"[{NODE_ID}] received fill_hole_response from {request.sender}: "
+                f"responder_id={fhs.responder_id} count={len(fhs.ordered_requests)}",
+                flush=True,
+            )
+            self.node.log_event(
+                "fill_hole_response_rpc_received",
+                sender=request.sender,
+                responder_id=fhs.responder_id,
+                view=fhs.view,
+                ordered_request_count=len(fhs.ordered_requests),
+            )
+            asyncio.create_task(self.node.handle_fill_hole_response(fhs, request.sender))
 
         
         return network_pb2.MessageReply(status="received")
@@ -73,7 +104,7 @@ async def node_loop(node):
     await node.handshake_loop()
     
     # testing a prompt multicast to all nodes (including itself)
-    if node.node_id == "1":
+    if node.node_id == "node1":
         pass
         # asyncio.create_task(node.multicast_prompt(prompt="explain RAFT consensus protocol"))
     
