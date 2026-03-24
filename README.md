@@ -1,12 +1,10 @@
 ## Installation
 
-It is recommended to use uv for faster installation:
+A local Docker container based on `sglang` v0.5.2 compatible with CUDA 12.6 ([here](https://hub.docker.com/layers/lmsysorg/sglang/v0.5.2-cu126/images/sha256-fce5585fa8da175224ead70727a4660f719e34adf0638aebf6dd27930f03e1b6)) is used as the backbone of the program.
+
+Run 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install uv
-uv pip install -r requirements.txt
+    docker build --platform linux/amd64 -t <image_name> .
 ```
 
 ## Debug Logs
