@@ -6,6 +6,7 @@ import grpc
 from grpc_reflection.v1alpha import reflection
 
 from rag import rag_pb2, rag_pb2_grpc
+from rag.bert_embedder import BertEmbedder, DEFAULT_BERT_MODEL
 from rag.document_store import LocalDocumentStore
 from rag.llm_client import build_inference_client_from_env
 
@@ -15,6 +16,9 @@ HOST = os.getenv("RAG_HOST", "0.0.0.0")
 PORT = int(os.getenv("RAG_PORT", "9100"))
 DOC_DIR = os.getenv("RAG_DOC_DIR", "/data/rag")
 USE_LLM_ANSWER = os.getenv("RAG_USE_LLM_ANSWER", "0") == "1"
+BERT_MODEL = os.getenv("RAG_BERT_MODEL", DEFAULT_BERT_MODEL)
+BERT_DEVICE = os.getenv("RAG_BERT_DEVICE") or None
+BERT_MAX_LENGTH = int(os.getenv("RAG_BERT_MAX_LENGTH", "512"))
 NEIGHBORS = [
     neighbor.strip()
     for neighbor in os.getenv("RAG_NEIGHBORS", "").split(",")
@@ -26,10 +30,17 @@ BOOTSTRAP_QUERY_ID = os.getenv("RAG_BOOTSTRAP_QUERY_ID", "")
 
 
 class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
-    def __init__(self, worker_id: str, store: LocalDocumentStore, neighbors: list[str]):
+    def __init__(
+        self,
+        worker_id: str,
+        store: LocalDocumentStore,
+        neighbors: list[str],
+        bert_embedder: BertEmbedder,
+    ):
         self.worker_id = worker_id
         self.store = store
         self.neighbors = neighbors
+        self.bert_embedder = bert_embedder
         self.llm_client = build_inference_client_from_env() if USE_LLM_ANSWER else None
 
     async def Ping(self, request, context):
@@ -47,19 +58,21 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         top_k = request.top_k or 5
         candidates = []
         local_candidates = self.store.route(request.query, top_k=top_k)
-        for score, section in local_candidates:
+        for score, node in local_candidates:
             print(
                 f"[rag-worker {self.worker_id}] local candidate query_id={query_id} "
-                f"score={score:.4f} section={section.section_id} title={section.title}",
+                f"score={score:.4f} node={node.node_id} title={node.title}",
                 flush=True,
             )
             candidates.append(
-                rag_pb2.SubtreeCandidate(
+                rag_pb2.NodeCandidate(
                     worker_id=self.worker_id,
-                    section_id=section.section_id,
-                    title=section.title,
+                    node_id=node.node_id,
+                    title=node.title,
                     score=float(score),
-                    preview=section.preview(),
+                    preview=node.preview(),
+                    description=node.description,
+                    metadata_json=node.metadata_json(),
                 )
             )
 
@@ -96,14 +109,34 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
 
 
 async def serve():
-    store = LocalDocumentStore(WORKER_ID, DOC_DIR)
-    store.load()
     print(
-        f"[rag-worker {WORKER_ID}] loaded {len(store.sections)} sections from {DOC_DIR}",
+        f"[rag-worker {WORKER_ID}] loading BERT embedder model={BERT_MODEL} "
+        f"device={BERT_DEVICE or 'auto'}",
+        flush=True,
+    )
+    bert_embedder = BertEmbedder(model_name=BERT_MODEL, device=BERT_DEVICE)
+    print(
+        f"[rag-worker {WORKER_ID}] loaded BERT embedder model={bert_embedder.model_name} "
+        f"device={bert_embedder.device}",
         flush=True,
     )
 
-    servicer = RagWorkerServicer(WORKER_ID, store, NEIGHBORS)
+    store = LocalDocumentStore(WORKER_ID, DOC_DIR)
+    store.load()
+    embedded_roots = store.embed_root_pageindex_nodes(
+        bert_embedder,
+        max_length=BERT_MAX_LENGTH,
+    )
+    print(
+        f"[rag-worker {WORKER_ID}] loaded {len(store.nodes)} PageIndex-style nodes from {DOC_DIR}",
+        flush=True,
+    )
+    print(
+        f"[rag-worker {WORKER_ID}] embedded {len(embedded_roots)} PageIndex root nodes",
+        flush=True,
+    )
+
+    servicer = RagWorkerServicer(WORKER_ID, store, NEIGHBORS, bert_embedder)
     server = grpc.aio.server()
     rag_pb2_grpc.add_RagServiceServicer_to_server(
         servicer,
