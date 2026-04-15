@@ -8,6 +8,7 @@ services:
     volumes:
       - .:/app
       - ./rag_docs/node1:/data/rag
+      - ./hf_cache/node1:/root/.cache/huggingface
     ports:
       - "9101:9100"
     environment:
@@ -15,10 +16,10 @@ services:
       RAG_WORKER_ID: node1
       RAG_PORT: 9100
       RAG_DOC_DIR: /data/rag
+      HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node2:9100,node3:9100,node4:9100
-      RAG_BOOTSTRAP_QUERY: ${RAG_QUERY:-What is this document about?}
+      RAG_BOOTSTRAP_QUERY: ${RAG_QUERY:-How many shares of did they repurchase during 2025?}
       RAG_BOOTSTRAP_DELAY_SECONDS: ${RAG_BOOTSTRAP_DELAY_SECONDS:-2.0}
-      RAG_QUERY_TTL: ${RAG_QUERY_TTL:-1}
 
   node2:
     build: .
@@ -28,6 +29,7 @@ services:
     volumes:
       - .:/app
       - ./rag_docs/node2:/data/rag
+      - ./hf_cache/node2:/root/.cache/huggingface
     ports:
       - "9102:9100"
     environment:
@@ -35,6 +37,7 @@ services:
       RAG_WORKER_ID: node2
       RAG_PORT: 9100
       RAG_DOC_DIR: /data/rag
+      HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node1:9100,node3:9100,node4:9100
 
   node3:
@@ -45,6 +48,7 @@ services:
     volumes:
       - .:/app
       - ./rag_docs/node3:/data/rag
+      - ./hf_cache/node3:/root/.cache/huggingface
     ports:
       - "9103:9100"
     environment:
@@ -52,6 +56,7 @@ services:
       RAG_WORKER_ID: node3
       RAG_PORT: 9100
       RAG_DOC_DIR: /data/rag
+      HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node1:9100,node2:9100,node4:9100
 
   node4:
@@ -62,6 +67,7 @@ services:
     volumes:
       - .:/app
       - ./rag_docs/node4:/data/rag
+      - ./hf_cache/node4:/root/.cache/huggingface
     ports:
       - "9104:9100"
     environment:
@@ -69,4 +75,5 @@ services:
       RAG_WORKER_ID: node4
       RAG_PORT: 9100
       RAG_DOC_DIR: /data/rag
+      HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node1:9100,node2:9100,node3:9100
