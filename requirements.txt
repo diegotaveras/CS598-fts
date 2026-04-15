@@ -52,3 +52,5 @@ yarl==1.23.0
 httpx
 pageindex==0.2.6
 pypdf==6.4.1
+transformers
+torch

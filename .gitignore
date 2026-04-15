@@ -150,6 +150,8 @@ activemq-data/
 # Environments
 .env
 .envrc
+rag_docs/
+hf_cache/
 .venv
 env/
 venv/
