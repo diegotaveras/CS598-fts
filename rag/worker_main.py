@@ -9,6 +9,7 @@ from grpc_reflection.v1alpha import reflection
 from rag import rag_pb2, rag_pb2_grpc
 from rag.bert_embedder import BertEmbedder, DEFAULT_BERT_MODEL
 from rag.document_store import LocalDocumentStore
+from rag.llm_client import build_inference_client_from_env
 
 
 WORKER_ID = os.getenv("RAG_WORKER_ID", os.getenv("HOSTNAME", "rag-worker"))
@@ -29,6 +30,12 @@ PAGEINDEX_RETRIEVAL_TIMEOUT_SECONDS = float(
 PAGEINDEX_RETRIEVAL_DEBUG_CHARS = int(
     os.getenv("RAG_PAGEINDEX_RETRIEVAL_DEBUG_CHARS", "4000")
 )
+COORDINATOR_SUMMARY_DELAY_SECONDS = float(
+    os.getenv("RAG_COORDINATOR_SUMMARY_DELAY_SECONDS", "3.0")
+)
+COORDINATOR_CONTEXT_MAX_CHARS = int(
+    os.getenv("RAG_COORDINATOR_CONTEXT_MAX_CHARS", "16000")
+)
 NEIGHBORS = [
     neighbor.strip()
     for neighbor in os.getenv("RAG_NEIGHBORS", "").split(",")
@@ -37,6 +44,8 @@ NEIGHBORS = [
 BOOTSTRAP_QUERY = os.getenv("RAG_BOOTSTRAP_QUERY", "")
 BOOTSTRAP_DELAY_SECONDS = float(os.getenv("RAG_BOOTSTRAP_DELAY_SECONDS", "2.0"))
 BOOTSTRAP_QUERY_ID = os.getenv("RAG_BOOTSTRAP_QUERY_ID", "")
+MULTICAST_RETRY_ATTEMPTS = int(os.getenv("RAG_MULTICAST_RETRY_ATTEMPTS", "6"))
+MULTICAST_RETRY_SECONDS = float(os.getenv("RAG_MULTICAST_RETRY_SECONDS", "5.0"))
 
 
 class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
@@ -53,6 +62,9 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         self.bert_embedder = bert_embedder
         self.background_tasks = set()
         self.evidence_by_query = {}
+        self.query_by_id = {}
+        self.summary_tasks = {}
+        self.llm_client = None
 
     async def Ping(self, request, context):
         return rag_pb2.RagPingReply(worker_id=self.worker_id, status="alive")
@@ -77,6 +89,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             #     f"query_id={request.query_id} node={item.node_id}: {item.content}",
             #     flush=True,
             # )
+        self.start_summary_task(request.query_id)
         return rag_pb2.SendEvidenceReply(
             worker_id=self.worker_id,
             accepted_count=len(request.evidence),
@@ -85,6 +98,8 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
     async def RouteQuery(self, request, context):
         query_id = request.query_id or str(uuid.uuid4())
         coordinator_addr = request.coordinator_addr or ADVERTISE_ADDR
+        if coordinator_addr == ADVERTISE_ADDR:
+            self.query_by_id[query_id] = request.query
 
         print(
             f"[rag-worker {self.worker_id}] received query_id={query_id} "
@@ -200,6 +215,17 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             f"query_id={query_id} doc_ids={doc_ids} count={len(evidence)}",
             flush=True,
         )
+        for item in evidence:
+            print(
+                f"[rag-worker {self.worker_id}] local evidence query_id={query_id} "
+                f"node={item.node_id} title={item.title} metadata={item.metadata_json}",
+                flush=True,
+            )
+            print(
+                f"[rag-worker {self.worker_id}] local evidence content "
+                f"query_id={query_id} node={item.node_id}: {item.content}",
+                flush=True,
+            )
         await self.send_evidence(
             coordinator_addr,
             query_id,
@@ -400,6 +426,74 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 unwrapped.append(item)
         return unwrapped
 
+    def start_summary_task(self, query_id: str):
+        if query_id not in self.query_by_id or query_id in self.summary_tasks:
+            return
+        task = asyncio.create_task(self.summarize_evidence_after_delay(query_id))
+        self.summary_tasks[query_id] = task
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+
+    async def summarize_evidence_after_delay(self, query_id: str):
+        await asyncio.sleep(COORDINATOR_SUMMARY_DELAY_SECONDS)
+        query = self.query_by_id.get(query_id)
+        evidence = self.evidence_by_query.get(query_id, [])
+        if not query or not evidence:
+            print(
+                f"[rag-worker {self.worker_id}] no evidence to summarize "
+                f"query_id={query_id}",
+                flush=True,
+            )
+            return
+
+        context = self.build_summary_context(evidence)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Answer the query using only the provided distributed evidence. "
+                    "Be concise. If the evidence contains conflicting values, mention them."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Query: {query}\n\nDistributed evidence:\n{context}",
+            },
+        ]
+        try:
+            if self.llm_client is None:
+                self.llm_client = build_inference_client_from_env()
+            answer = await self.llm_client.get_text(messages)
+        except Exception as exc:
+            print(
+                f"[rag-worker {self.worker_id}] final answer failed "
+                f"query_id={query_id}: {exc}",
+                flush=True,
+            )
+            return
+
+        print(
+            f"[rag-worker {self.worker_id}] final answer query_id={query_id}: "
+            f"{answer}",
+            flush=True,
+        )
+
+    def build_summary_context(self, evidence):
+        parts = []
+        for index, item in enumerate(evidence, start=1):
+            parts.append(
+                f"[Evidence {index}]\n"
+                f"worker_id: {item.worker_id}\n"
+                f"node_id: {item.node_id}\n"
+                f"title: {item.title}\n"
+                f"metadata: {item.metadata_json}\n"
+                f"content: {item.content}"
+            )
+        return self._compact_text(
+            "\n\n".join(parts),
+            max_chars=COORDINATOR_CONTEXT_MAX_CHARS,
+        )
+
     def _compact_text(self, text: str, max_chars: int = 1200):
         if len(text) <= max_chars:
             return text
@@ -413,6 +507,8 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 top_k=request.top_k,
                 coordinator_addr=ADVERTISE_ADDR,
             )
+        if request.coordinator_addr == ADVERTISE_ADDR:
+            self.query_by_id[request.query_id] = request.query
         results = await asyncio.gather(
             *(self.send_query_to_neighbor(target, request) for target in self.neighbors),
             return_exceptions=True,
@@ -420,22 +516,31 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         return sum(1 for result in results if result is True)
 
     async def send_query_to_neighbor(self, target, request):
-        try:
-            async with grpc.aio.insecure_channel(target) as channel:
-                stub = rag_pb2_grpc.RagServiceStub(channel)
-                await stub.RouteQuery(request, timeout=5.0)
-            print(
-                f"[rag-worker {self.worker_id}] multicast query_id={request.query_id} to={target}",
-                flush=True,
-            )
-            return True
-        except Exception as exc:
-            print(
-                f"[rag-worker {self.worker_id}] failed multicast query_id={request.query_id} "
-                f"to={target}: {exc}",
-                flush=True,
-            )
-            return False
+        for attempt in range(1, MULTICAST_RETRY_ATTEMPTS + 1):
+            try:
+                async with grpc.aio.insecure_channel(target) as channel:
+                    stub = rag_pb2_grpc.RagServiceStub(channel)
+                    await stub.RouteQuery(request, timeout=5.0)
+                print(
+                    f"[rag-worker {self.worker_id}] multicast query_id={request.query_id} "
+                    f"to={target} attempt={attempt}",
+                    flush=True,
+                )
+                return True
+            except Exception as exc:
+                if attempt == MULTICAST_RETRY_ATTEMPTS:
+                    print(
+                        f"[rag-worker {self.worker_id}] failed multicast query_id={request.query_id} "
+                        f"to={target} attempts={attempt}: {exc}",
+                        flush=True,
+                    )
+                    return False
+                print(
+                    f"[rag-worker {self.worker_id}] multicast retry query_id={request.query_id} "
+                    f"to={target} attempt={attempt}/{MULTICAST_RETRY_ATTEMPTS}: {exc}",
+                    flush=True,
+                )
+                await asyncio.sleep(MULTICAST_RETRY_SECONDS)
 
 
 
