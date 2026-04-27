@@ -39,10 +39,10 @@ class InferenceClient:
             "messages": messages,
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
-            "reasoning": {
-                "effort": "none",
-            },
         }
+        reasoning_effort = self.config.metadata.get("reasoning_effort")
+        if reasoning_effort:
+            payload["reasoning"] = {"effort": reasoning_effort}
 
         payload.update(overrides)
         return payload
