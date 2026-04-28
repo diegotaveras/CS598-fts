@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from rag.bert_embedder import cosine_similarity
-from rag.local_rag_smoke import read_document_text
 
 try:
     from dotenv import load_dotenv
@@ -15,6 +14,32 @@ try:
 except ImportError:
     pass
 
+
+def read_pdf_text(path: Path) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise RuntimeError(
+            "PDF input requires pypdf. Install dependencies with: pip install -r requirements.txt"
+        ) from exc
+
+    reader = PdfReader(str(path))
+    pages = []
+    for index, page in enumerate(reader.pages, start=1):
+        text = page.extract_text() or ""
+        if text.strip():
+            pages.append(f"# Page {index}\n\n{text.strip()}")
+
+    if not pages:
+        raise RuntimeError(f"No extractable text found in PDF: {path}")
+
+    return "\n\n".join(pages)
+
+
+def read_document_text(path: Path, encoding: str) -> str:
+    if path.suffix.lower() == ".pdf":
+        return read_pdf_text(path)
+    return path.read_text(encoding=encoding)
 
 @dataclass
 class PageIndexNode:
