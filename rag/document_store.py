@@ -175,13 +175,6 @@ class LocalDocumentStore:
             encoding="utf-8",
         )
 
-    def _document_fingerprint(self, path: Path):
-        stat = path.stat()
-        return {
-            "mtime_ns": stat.st_mtime_ns,
-            "size": stat.st_size,
-        }
-
     def _load_pageindex_tree(self, path: Path, manifest) -> bool:
         if not self.pageindex_api_key:
             print(
@@ -202,19 +195,17 @@ class LocalDocumentStore:
             return False
 
         doc_key = path.relative_to(self.doc_dir).as_posix()
-        fingerprint = self._document_fingerprint(path)
         manifest_entry = manifest.get(doc_key, {})
 
         client = PageIndexClient(api_key=self.pageindex_api_key)
         doc_id = manifest_entry.get("doc_id")
         try:
-            if manifest_entry.get("fingerprint") != fingerprint or not doc_id:
+            if not doc_id:
                 print(f"[rag-store {self.worker_id}] submitting {doc_key} to PageIndex", flush=True)
                 result = client.submit_document(str(path))
                 doc_id = result["doc_id"]
                 manifest[doc_key] = {
                     "doc_id": doc_id,
-                    "fingerprint": fingerprint,
                 }
 
             tree_result = client.get_tree(doc_id, node_summary=True)
