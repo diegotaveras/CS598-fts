@@ -1,7 +1,8 @@
 import os
 import asyncio
 import grpc
-from agent import agent_state, inference_client
+from common.inference_config import InferenceConfig
+from common.inference_client import InferenceClient
 
 import agent_pb2
 import agent_pb2_grpc
@@ -49,7 +50,7 @@ async def agent_setup():
     backend = os.getenv("BACKEND", "openrouter")
 
     if backend == "openrouter":
-        state = agent_state.AgentState(
+        config = InferenceConfig(
             backend=backend,
             model_name="nvidia/nemotron-3-super-120b-a12b:free",
             endpoint="https://openrouter.ai/api/v1",
@@ -57,14 +58,14 @@ async def agent_setup():
             max_tokens=1024
         )
     else:
-        state = agent_state.AgentState(
+        config = InferenceConfig(
             backend="sglang",
             model_name=os.getenv("MODEL_NAME", "default-model"),
             endpoint=os.getenv("SGLANG_BASE_URL", "http://127.0.0.1:30000"),
             api_key=None,
         )
 
-    client = inference_client.InferenceClient(state)
+    client = InferenceClient(config)
     return client
 
 

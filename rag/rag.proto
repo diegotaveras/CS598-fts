@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package rag;
+
+service RagService {
+  rpc Ping(RagPingRequest) returns (RagPingReply);
+  rpc RouteQuery(RouteQueryRequest) returns (RouteQueryReply);
+  rpc SendEvidence(SendEvidenceRequest) returns (SendEvidenceReply);
+}
+
+message RagPingRequest {
+  string sender = 1;
+}
+
+message RagPingReply {
+  string worker_id = 1;
+  string status = 2;
+}
+
+message RouteQueryRequest {
+  string query_id = 1;
+  string query = 2;
+  int32 top_k = 3;
+  string coordinator_addr = 4;
+}
+
+message NodeCandidate {
+  string worker_id = 1;
+  string node_id = 2;
+  string title = 3;
+  double score = 4;
+  string preview = 5;
+  string description = 6;
+  string metadata_json = 7;
+}
+
+message RouteQueryReply {
+  string worker_id = 1;
+  repeated NodeCandidate candidates = 2;
+}
+
+message Evidence {
+  string worker_id = 1;
+  string node_id = 2;
+  string title = 3;
+  string content = 4;
+  string metadata_json = 5;
+}
+
+message SendEvidenceRequest {
+  string query_id = 1;
+  repeated Evidence evidence = 2;
+}
+
+message SendEvidenceReply {
+  string worker_id = 1;
+  int32 accepted_count = 2;
+}
