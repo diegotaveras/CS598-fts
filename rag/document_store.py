@@ -5,6 +5,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
+
 from rag.bert_embedder import cosine_similarity
 
 try:
@@ -74,9 +76,14 @@ class LocalDocumentStore:
         self.pageindex_poll_seconds = int(os.getenv("RAG_PAGEINDEX_POLL_SECONDS", "10"))
         self.manifest_path = self.doc_dir / ".pageindex_manifest.json"
         self.nodes: dict[str, PageIndexNode] = {}
+        self.user_embedding: list[float] | None = None
+        self.user_embedding_model: str | None = None
+        self.user_embedding_dimension: int = 0
+        self.user_embedding_source_node_ids: list[str] = []
 
     def load(self):
         self.nodes.clear()
+        self._clear_user_embedding()
 
         if not self.doc_dir.exists():
             self.doc_dir.mkdir(parents=True, exist_ok=True)
@@ -144,7 +151,62 @@ class LocalDocumentStore:
                 f"node_id={node.node_id} dimension={len(result.embedding)}",
                 flush=True,
             )
+        self.calculate_user_embedding()
         return roots
+
+    def calculate_user_embedding(self):
+        embedded_roots = [
+            node
+            for node in self.root_pageindex_nodes()
+            if node.embedding is not None
+        ]
+        if not embedded_roots:
+            self._clear_user_embedding()
+            print(
+                f"[rag-store {self.worker_id}] no embedded PageIndex roots; "
+                "user embedding is unavailable",
+                flush=True,
+            )
+            return None
+
+        first_dimension = len(embedded_roots[0].embedding)
+        compatible_roots = [
+            node
+            for node in embedded_roots
+            if len(node.embedding) == first_dimension
+        ]
+        if len(compatible_roots) != len(embedded_roots):
+            skipped = len(embedded_roots) - len(compatible_roots)
+            print(
+                f"[rag-store {self.worker_id}] skipped {skipped} root embeddings "
+                "with mismatched dimensions while calculating user embedding",
+                flush=True,
+            )
+
+        embedding_matrix = np.asarray(
+            [node.embedding for node in compatible_roots],
+            dtype=np.float64,
+        )
+        self.user_embedding = embedding_matrix.mean(axis=0).astype(float).tolist()
+        self.user_embedding_model = compatible_roots[0].metadata.get("embedding_model")
+        self.user_embedding_dimension = first_dimension
+        self.user_embedding_source_node_ids = [
+            node.node_id
+            for node in compatible_roots
+        ]
+        print(
+            f"[rag-store {self.worker_id}] calculated user embedding "
+            f"dimension={self.user_embedding_dimension} "
+            f"source_roots={len(self.user_embedding_source_node_ids)}",
+            flush=True,
+        )
+        return self.user_embedding
+
+    def _clear_user_embedding(self):
+        self.user_embedding = None
+        self.user_embedding_model = None
+        self.user_embedding_dimension = 0
+        self.user_embedding_source_node_ids = []
 
     def _embedding_text_for_root(self, node: PageIndexNode) -> str:
         parts = [
