@@ -7,7 +7,7 @@ import grpc
 from grpc_reflection.v1alpha import reflection
 
 from rag import rag_pb2, rag_pb2_grpc
-from rag.bert_embedder import BertEmbedder, DEFAULT_BERT_MODEL
+from rag.bert_embedder import BertEmbedder, DEFAULT_BERT_MODEL, cosine_similarity
 from rag.document_store import LocalDocumentStore
 from rag.llm_client import build_inference_client_from_env
 
@@ -21,7 +21,7 @@ BERT_MODEL = os.getenv("RAG_BERT_MODEL", DEFAULT_BERT_MODEL)
 BERT_DEVICE = os.getenv("RAG_BERT_DEVICE") or None
 BERT_MAX_LENGTH = int(os.getenv("RAG_BERT_MAX_LENGTH", "512"))
 PAGEINDEX_QUERY_TOP_K = int(os.getenv("RAG_PAGEINDEX_QUERY_TOP_K", "3"))
-LOCAL_MATCH_THRESHOLD = float(os.getenv("RAG_LOCAL_MATCH_THRESHOLD", "0.7"))
+LOCAL_MATCH_THRESHOLD = float(os.getenv("RAG_LOCAL_MATCH_THRESHOLD", "0.67"))
 PAGEINDEX_RETRIEVAL_POLL_SECONDS = float(
     os.getenv("RAG_PAGEINDEX_RETRIEVAL_POLL_SECONDS", "2.0")
 )
@@ -50,6 +50,13 @@ USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS = int(
 USER_EMBEDDING_REGISTER_RETRY_SECONDS = float(
     os.getenv("RAG_USER_EMBEDDING_REGISTER_RETRY_SECONDS", "5.0")
 )
+USER_EMBEDDING_SYNC_RETRY_ATTEMPTS = int(
+    os.getenv("RAG_USER_EMBEDDING_SYNC_RETRY_ATTEMPTS", "12")
+)
+USER_EMBEDDING_SYNC_RETRY_SECONDS = float(
+    os.getenv("RAG_USER_EMBEDDING_SYNC_RETRY_SECONDS", "5.0")
+)
+CHAIN_HOP_MAX_HOPS = int(os.getenv("RAG_CHAIN_HOP_MAX_HOPS", "4"))
 BOOTSTRAP_QUERY = os.getenv("RAG_BOOTSTRAP_QUERY", "")
 BOOTSTRAP_DELAY_SECONDS = float(os.getenv("RAG_BOOTSTRAP_DELAY_SECONDS", "5.0"))
 BOOTSTRAP_QUERY_ID = os.getenv("RAG_BOOTSTRAP_QUERY_ID", "")
@@ -86,6 +93,15 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             registered_count=len(self.user_embedding_registry),
         )
 
+    async def GetUserEmbeddingRegistry(self, request, context):
+        return rag_pb2.GetUserEmbeddingRegistryReply(
+            worker_id=self.worker_id,
+            users=[
+                self.user_embedding_record_from_entry(entry)
+                for entry in self.user_embedding_registry.values()
+            ],
+        )
+
     def record_user_embedding(self, request):
         embedding = list(request.embedding)
         dimension = request.embedding_dimension or len(embedding)
@@ -106,6 +122,17 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             flush=True,
         )
 
+    def record_user_embedding_record(self, record):
+        self.user_embedding_registry[record.worker_id] = {
+            "worker_id": record.worker_id,
+            "advertise_addr": record.advertise_addr,
+            "embedding": list(record.embedding),
+            "embedding_model": record.embedding_model,
+            "embedding_dimension": record.embedding_dimension or len(record.embedding),
+            "source_root_count": record.source_root_count,
+            "source_node_ids": list(record.source_node_ids),
+        }
+
     def build_user_embedding_registration(self):
         return rag_pb2.RegisterUserEmbeddingRequest(
             worker_id=self.worker_id,
@@ -115,6 +142,17 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             embedding_dimension=self.store.user_embedding_dimension,
             source_root_count=len(self.store.user_embedding_source_node_ids),
             source_node_ids=self.store.user_embedding_source_node_ids,
+        )
+
+    def user_embedding_record_from_entry(self, entry):
+        return rag_pb2.UserEmbeddingRecord(
+            worker_id=entry["worker_id"],
+            advertise_addr=entry["advertise_addr"],
+            embedding=entry["embedding"],
+            embedding_model=entry.get("embedding_model", ""),
+            embedding_dimension=entry.get("embedding_dimension", 0),
+            source_root_count=entry.get("source_root_count", 0),
+            source_node_ids=entry.get("source_node_ids", []),
         )
 
     async def SendEvidence(self, request, context):
@@ -147,12 +185,18 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
     async def RouteQuery(self, request, context):
         query_id = request.query_id or str(uuid.uuid4())
         coordinator_addr = request.coordinator_addr or ADVERTISE_ADDR
+        curr_hop = request.curr_hop
+        max_hops = request.max_hops or CHAIN_HOP_MAX_HOPS
+        visited_worker_ids = list(request.visited_worker_ids)
+        if self.worker_id not in visited_worker_ids:
+            visited_worker_ids.append(self.worker_id)
         if coordinator_addr == ADVERTISE_ADDR:
             self.query_by_id[query_id] = request.query
 
         print(
             f"[rag-worker {self.worker_id}] received query_id={query_id} "
-            f"coordinator={coordinator_addr} query={request.query}",
+            f"coordinator={coordinator_addr} hop={curr_hop}/{max_hops} "
+            f"visited={visited_worker_ids} query={request.query}",
             flush=True,
         )
 
@@ -209,10 +253,169 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             coordinator_addr,
             matched_candidates,
         )
+        if not matched_candidates:
+            self.start_chain_hop_forward_task(
+                request,
+                query_id,
+                coordinator_addr,
+                curr_hop,
+                max_hops,
+                visited_worker_ids,
+            )
         return rag_pb2.RouteQueryReply(
             worker_id=self.worker_id,
             candidates=candidates,
         )
+
+    def start_chain_hop_forward_task(
+        self,
+        request,
+        query_id: str,
+        coordinator_addr: str,
+        curr_hop: int,
+        max_hops: int,
+        visited_worker_ids: list[str],
+    ):
+        if curr_hop + 1 >= max_hops:
+            print(
+                f"[rag-worker {self.worker_id}] chain hop limit reached "
+                f"query_id={query_id} hop={curr_hop}/{max_hops}",
+                flush=True,
+            )
+            return
+
+        task = asyncio.create_task(
+            self.forward_chain_hop(
+                request,
+                query_id,
+                coordinator_addr,
+                curr_hop,
+                max_hops,
+                visited_worker_ids,
+            )
+        )
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+
+    async def forward_chain_hop(
+        self,
+        request,
+        query_id: str,
+        coordinator_addr: str,
+        curr_hop: int,
+        max_hops: int,
+        visited_worker_ids: list[str],
+    ):
+        target = await self.choose_chain_hop_target(
+            request.query,
+            set(visited_worker_ids),
+        )
+        if target is None:
+            print(
+                f"[rag-worker {self.worker_id}] no chain-hop target "
+                f"query_id={query_id} hop={curr_hop}/{max_hops}",
+                flush=True,
+            )
+            return
+
+        next_request = rag_pb2.RouteQueryRequest(
+            query_id=query_id,
+            query=request.query,
+            top_k=request.top_k,
+            coordinator_addr=coordinator_addr,
+            curr_hop=curr_hop + 1,
+            max_hops=max_hops,
+            visited_worker_ids=visited_worker_ids,
+        )
+        await self.send_chain_query_to_target(target, next_request)
+
+    async def choose_chain_hop_target(self, query: str, visited_worker_ids: set[str]):
+        if self.worker_id != INIT_WORKER_ID:
+            await self.sync_user_embedding_registry_once()
+
+        query_embedding = self.bert_embedder.embed_text(
+            query,
+            max_length=BERT_MAX_LENGTH,
+        ).embedding
+        scored = []
+        for entry in self.user_embedding_registry.values():
+            worker_id = entry.get("worker_id")
+            embedding = entry.get("embedding") or []
+            advertise_addr = entry.get("advertise_addr")
+            if not worker_id or not advertise_addr or not embedding:
+                continue
+            if worker_id in visited_worker_ids:
+                continue
+            score = cosine_similarity(query_embedding, embedding)
+            scored.append((score, worker_id, advertise_addr))
+
+        if not scored:
+            return None
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        score, worker_id, advertise_addr = scored[0]
+        print(
+            f"[rag-worker {self.worker_id}] chain-hop selected target "
+            f"worker_id={worker_id} addr={advertise_addr} score={score:.4f}",
+            flush=True,
+        )
+        return advertise_addr
+
+    async def send_chain_query_to_target(self, target, request):
+        for attempt in range(1, MULTICAST_RETRY_ATTEMPTS + 1):
+            try:
+                async with grpc.aio.insecure_channel(target) as channel:
+                    stub = rag_pb2_grpc.RagServiceStub(channel)
+                    await stub.RouteQuery(request, timeout=5.0)
+                print(
+                    f"[rag-worker {self.worker_id}] chain-hop query_id={request.query_id} "
+                    f"to={target} hop={request.curr_hop}/{request.max_hops} "
+                    f"attempt={attempt}",
+                    flush=True,
+                )
+                return True
+            except Exception as exc:
+                if attempt == MULTICAST_RETRY_ATTEMPTS:
+                    print(
+                        f"[rag-worker {self.worker_id}] failed chain-hop "
+                        f"query_id={request.query_id} to={target} "
+                        f"attempts={attempt}: {exc}",
+                        flush=True,
+                    )
+                    return False
+                print(
+                    f"[rag-worker {self.worker_id}] chain-hop retry "
+                    f"query_id={request.query_id} to={target} "
+                    f"attempt={attempt}/{MULTICAST_RETRY_ATTEMPTS}: {exc}",
+                    flush=True,
+                )
+                await asyncio.sleep(MULTICAST_RETRY_SECONDS)
+
+    async def sync_user_embedding_registry_once(self):
+        try:
+            async with grpc.aio.insecure_channel(INIT_ADDR) as channel:
+                stub = rag_pb2_grpc.RagServiceStub(channel)
+                reply = await stub.GetUserEmbeddingRegistry(
+                    rag_pb2.GetUserEmbeddingRegistryRequest(
+                        requester_worker_id=self.worker_id,
+                    ),
+                    timeout=5.0,
+                )
+            for record in reply.users:
+                self.record_user_embedding_record(record)
+            print(
+                f"[rag-worker {self.worker_id}] synced user embedding registry "
+                f"from init={reply.worker_id} registry_size={len(self.user_embedding_registry)}",
+                flush=True,
+            )
+            return True
+        except Exception as exc:
+            print(
+                f"[rag-worker {self.worker_id}] user embedding registry sync failed "
+                f"init_addr={INIT_ADDR}: {exc}",
+                flush=True,
+            )
+            return False
 
     def start_pageindex_retrieval_task(
         self,
@@ -650,8 +853,7 @@ async def serve():
     )
 
     servicer = RagWorkerServicer(WORKER_ID, store, NEIGHBORS, bert_embedder)
-    if WORKER_ID == INIT_WORKER_ID:
-        servicer.record_user_embedding(servicer.build_user_embedding_registration())
+    servicer.record_user_embedding(servicer.build_user_embedding_registration())
 
     server = grpc.aio.server()
     rag_pb2_grpc.add_RagServiceServicer_to_server(
@@ -673,6 +875,7 @@ async def serve():
     )
     await server.start()
     asyncio.create_task(register_user_embedding_with_init(servicer))
+    asyncio.create_task(sync_user_embedding_registry_from_init(servicer))
     if BOOTSTRAP_QUERY and (BOOTSTRAP_DELAY_SECONDS > 0.0):
         asyncio.create_task(inject_bootstrap_query(servicer))
     await server.wait_for_termination()
@@ -712,6 +915,24 @@ async def register_user_embedding_with_init(servicer: RagWorkerServicer):
             await asyncio.sleep(USER_EMBEDDING_REGISTER_RETRY_SECONDS)
 
 
+async def sync_user_embedding_registry_from_init(servicer: RagWorkerServicer):
+    if WORKER_ID == INIT_WORKER_ID:
+        return
+
+    for attempt in range(1, USER_EMBEDDING_SYNC_RETRY_ATTEMPTS + 1):
+        ok = await servicer.sync_user_embedding_registry_once()
+        if ok:
+            return
+        if attempt == USER_EMBEDDING_SYNC_RETRY_ATTEMPTS:
+            print(
+                f"[rag-worker {WORKER_ID}] failed to sync user embedding registry "
+                f"from init addr={INIT_ADDR} attempts={attempt}",
+                flush=True,
+            )
+            return
+        await asyncio.sleep(USER_EMBEDDING_SYNC_RETRY_SECONDS)
+
+
 async def inject_bootstrap_query(servicer: RagWorkerServicer):
     await asyncio.sleep(BOOTSTRAP_DELAY_SECONDS)
     query_id = BOOTSTRAP_QUERY_ID or str(uuid.uuid4())
@@ -720,6 +941,8 @@ async def inject_bootstrap_query(servicer: RagWorkerServicer):
         query=BOOTSTRAP_QUERY,
         top_k=5,
         coordinator_addr=ADVERTISE_ADDR,
+        curr_hop=0,
+        max_hops=CHAIN_HOP_MAX_HOPS,
     )
     print(
         f"[rag-worker {WORKER_ID}] injecting bootstrap query_id={query_id} "
@@ -727,11 +950,6 @@ async def inject_bootstrap_query(servicer: RagWorkerServicer):
         flush=True,
     )
     await servicer.RouteQuery(request, context=None)
-    sent_count = await servicer.broadcast_query(request)
-    print(
-        f"[rag-worker {WORKER_ID}] broadcast query_id={query_id} sent_count={sent_count}",
-        flush=True,
-    )
 
 
 def main():
