@@ -41,6 +41,14 @@ NEIGHBORS = [
     for neighbor in os.getenv("RAG_NEIGHBORS", "").split(",")
     if neighbor.strip()
 ]
+INIT_WORKER_ID = os.getenv("RAG_INIT_WORKER_ID", "node1")
+INIT_ADDR = os.getenv("RAG_INIT_ADDR", "node1:9100")
+USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS = int(
+    os.getenv("RAG_USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS", "12")
+)
+USER_EMBEDDING_REGISTER_RETRY_SECONDS = float(
+    os.getenv("RAG_USER_EMBEDDING_REGISTER_RETRY_SECONDS", "5.0")
+)
 BOOTSTRAP_QUERY = os.getenv("RAG_BOOTSTRAP_QUERY", "")
 BOOTSTRAP_DELAY_SECONDS = float(os.getenv("RAG_BOOTSTRAP_DELAY_SECONDS", "5.0"))
 BOOTSTRAP_QUERY_ID = os.getenv("RAG_BOOTSTRAP_QUERY_ID", "")
@@ -65,9 +73,48 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         self.query_by_id = {}
         self.summary_tasks = {}
         self.llm_client = None
+        self.user_embedding_registry = {}
 
     async def Ping(self, request, context):
         return rag_pb2.RagPingReply(worker_id=self.worker_id, status="alive")
+
+    async def RegisterUserEmbedding(self, request, context):
+        self.record_user_embedding(request)
+        return rag_pb2.RegisterUserEmbeddingReply(
+            worker_id=self.worker_id,
+            registered_count=len(self.user_embedding_registry),
+        )
+
+    def record_user_embedding(self, request):
+        embedding = list(request.embedding)
+        dimension = request.embedding_dimension or len(embedding)
+        self.user_embedding_registry[request.worker_id] = {
+            "worker_id": request.worker_id,
+            "advertise_addr": request.advertise_addr,
+            "embedding": embedding,
+            "embedding_model": request.embedding_model,
+            "embedding_dimension": dimension,
+            "source_root_count": request.source_root_count,
+            "source_node_ids": list(request.source_node_ids),
+        }
+        print(
+            f"[rag-worker {self.worker_id}] registered user embedding "
+            f"worker_id={request.worker_id} addr={request.advertise_addr} "
+            f"dimension={dimension} source_roots={request.source_root_count} "
+            f"registry_size={len(self.user_embedding_registry)}",
+            flush=True,
+        )
+
+    def build_user_embedding_registration(self):
+        return rag_pb2.RegisterUserEmbeddingRequest(
+            worker_id=self.worker_id,
+            advertise_addr=ADVERTISE_ADDR,
+            embedding=self.store.user_embedding or [],
+            embedding_model=self.store.user_embedding_model or "",
+            embedding_dimension=self.store.user_embedding_dimension,
+            source_root_count=len(self.store.user_embedding_source_node_ids),
+            source_node_ids=self.store.user_embedding_source_node_ids,
+        )
 
     async def SendEvidence(self, request, context):
         evidence = self.evidence_by_query.setdefault(request.query_id, [])
@@ -89,7 +136,8 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             #     f"query_id={request.query_id} node={item.node_id}: {item.content}",
             #     flush=True,
             # )
-        self.start_summary_task(request.query_id)
+        if request.evidence:
+            self.start_summary_task(request.query_id)
         return rag_pb2.SendEvidenceReply(
             worker_id=self.worker_id,
             accepted_count=len(request.evidence),
@@ -439,6 +487,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         query = self.query_by_id.get(query_id)
         evidence = self.evidence_by_query.get(query_id, [])
         if not query or not evidence:
+            self.summary_tasks.pop(query_id, None)
             print(
                 f"[rag-worker {self.worker_id}] no evidence to summarize "
                 f"query_id={query_id}",
@@ -571,8 +620,17 @@ async def serve():
         f"[rag-worker {WORKER_ID}] embedded {len(embedded_roots)} PageIndex root nodes",
         flush=True,
     )
+    print(
+        f"[rag-worker {WORKER_ID}] user embedding "
+        f"dimension={store.user_embedding_dimension} "
+        f"source_roots={len(store.user_embedding_source_node_ids)}",
+        flush=True,
+    )
 
     servicer = RagWorkerServicer(WORKER_ID, store, NEIGHBORS, bert_embedder)
+    if WORKER_ID == INIT_WORKER_ID:
+        servicer.record_user_embedding(servicer.build_user_embedding_registration())
+
     server = grpc.aio.server()
     rag_pb2_grpc.add_RagServiceServicer_to_server(
         servicer,
@@ -592,9 +650,44 @@ async def serve():
         flush=True,
     )
     await server.start()
-    if BOOTSTRAP_QUERY:
+    asyncio.create_task(register_user_embedding_with_init(servicer))
+    if BOOTSTRAP_QUERY and (BOOTSTRAP_DELAY_SECONDS > 0.0):
         asyncio.create_task(inject_bootstrap_query(servicer))
     await server.wait_for_termination()
+
+
+async def register_user_embedding_with_init(servicer: RagWorkerServicer):
+    if WORKER_ID == INIT_WORKER_ID:
+        return
+
+    request = servicer.build_user_embedding_registration()
+    for attempt in range(1, USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS + 1):
+        try:
+            async with grpc.aio.insecure_channel(INIT_ADDR) as channel:
+                stub = rag_pb2_grpc.RagServiceStub(channel)
+                reply = await stub.RegisterUserEmbedding(request, timeout=5.0)
+            print(
+                f"[rag-worker {WORKER_ID}] registered user embedding with init "
+                f"addr={INIT_ADDR} init_worker={reply.worker_id} "
+                f"registered_count={reply.registered_count} attempt={attempt}",
+                flush=True,
+            )
+            return
+        except Exception as exc:
+            if attempt == USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS:
+                print(
+                    f"[rag-worker {WORKER_ID}] failed to register user embedding "
+                    f"with init addr={INIT_ADDR} attempts={attempt}: {exc}",
+                    flush=True,
+                )
+                return
+            print(
+                f"[rag-worker {WORKER_ID}] retrying user embedding registration "
+                f"addr={INIT_ADDR} attempt={attempt}/"
+                f"{USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS}: {exc}",
+                flush=True,
+            )
+            await asyncio.sleep(USER_EMBEDDING_REGISTER_RETRY_SECONDS)
 
 
 async def inject_bootstrap_query(servicer: RagWorkerServicer):
