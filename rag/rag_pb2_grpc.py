@@ -44,6 +44,11 @@ class RagServiceStub(object):
                 request_serializer=rag_dot_rag__pb2.RegisterUserEmbeddingRequest.SerializeToString,
                 response_deserializer=rag_dot_rag__pb2.RegisterUserEmbeddingReply.FromString,
                 _registered_method=True)
+        self.GetUserEmbeddingRegistry = channel.unary_unary(
+                '/rag.RagService/GetUserEmbeddingRegistry',
+                request_serializer=rag_dot_rag__pb2.GetUserEmbeddingRegistryRequest.SerializeToString,
+                response_deserializer=rag_dot_rag__pb2.GetUserEmbeddingRegistryReply.FromString,
+                _registered_method=True)
         self.RouteQuery = channel.unary_unary(
                 '/rag.RagService/RouteQuery',
                 request_serializer=rag_dot_rag__pb2.RouteQueryRequest.SerializeToString,
@@ -66,6 +71,12 @@ class RagServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def RegisterUserEmbedding(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetUserEmbeddingRegistry(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -95,6 +106,11 @@ def add_RagServiceServicer_to_server(servicer, server):
                     servicer.RegisterUserEmbedding,
                     request_deserializer=rag_dot_rag__pb2.RegisterUserEmbeddingRequest.FromString,
                     response_serializer=rag_dot_rag__pb2.RegisterUserEmbeddingReply.SerializeToString,
+            ),
+            'GetUserEmbeddingRegistry': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetUserEmbeddingRegistry,
+                    request_deserializer=rag_dot_rag__pb2.GetUserEmbeddingRegistryRequest.FromString,
+                    response_serializer=rag_dot_rag__pb2.GetUserEmbeddingRegistryReply.SerializeToString,
             ),
             'RouteQuery': grpc.unary_unary_rpc_method_handler(
                     servicer.RouteQuery,
@@ -161,6 +177,33 @@ class RagService(object):
             '/rag.RagService/RegisterUserEmbedding',
             rag_dot_rag__pb2.RegisterUserEmbeddingRequest.SerializeToString,
             rag_dot_rag__pb2.RegisterUserEmbeddingReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetUserEmbeddingRegistry(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rag.RagService/GetUserEmbeddingRegistry',
+            rag_dot_rag__pb2.GetUserEmbeddingRegistryRequest.SerializeToString,
+            rag_dot_rag__pb2.GetUserEmbeddingRegistryReply.FromString,
             options,
             channel_credentials,
             insecure,

@@ -5,6 +5,7 @@ package rag;
 service RagService {
   rpc Ping(RagPingRequest) returns (RagPingReply);
   rpc RegisterUserEmbedding(RegisterUserEmbeddingRequest) returns (RegisterUserEmbeddingReply);
+  rpc GetUserEmbeddingRegistry(GetUserEmbeddingRegistryRequest) returns (GetUserEmbeddingRegistryReply);
   rpc RouteQuery(RouteQueryRequest) returns (RouteQueryReply);
   rpc SendEvidence(SendEvidenceRequest) returns (SendEvidenceReply);
 }
@@ -33,11 +34,33 @@ message RegisterUserEmbeddingReply {
   int32 registered_count = 2;
 }
 
+message UserEmbeddingRecord {
+  string worker_id = 1;
+  string advertise_addr = 2;
+  repeated double embedding = 3;
+  string embedding_model = 4;
+  int32 embedding_dimension = 5;
+  int32 source_root_count = 6;
+  repeated string source_node_ids = 7;
+}
+
+message GetUserEmbeddingRegistryRequest {
+  string requester_worker_id = 1;
+}
+
+message GetUserEmbeddingRegistryReply {
+  string worker_id = 1;
+  repeated UserEmbeddingRecord users = 2;
+}
+
 message RouteQueryRequest {
   string query_id = 1;
   string query = 2;
   int32 top_k = 3;
   string coordinator_addr = 4;
+  int32 curr_hop = 5;
+  int32 max_hops = 6;
+  repeated string visited_worker_ids = 7;
 }
 
 message NodeCandidate {
