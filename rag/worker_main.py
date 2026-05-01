@@ -21,6 +21,7 @@ BERT_MODEL = os.getenv("RAG_BERT_MODEL", DEFAULT_BERT_MODEL)
 BERT_DEVICE = os.getenv("RAG_BERT_DEVICE") or None
 BERT_MAX_LENGTH = int(os.getenv("RAG_BERT_MAX_LENGTH", "512"))
 PAGEINDEX_QUERY_TOP_K = int(os.getenv("RAG_PAGEINDEX_QUERY_TOP_K", "3"))
+LOCAL_MATCH_THRESHOLD = float(os.getenv("RAG_LOCAL_MATCH_THRESHOLD", "0.7"))
 PAGEINDEX_RETRIEVAL_POLL_SECONDS = float(
     os.getenv("RAG_PAGEINDEX_RETRIEVAL_POLL_SECONDS", "2.0")
 )
@@ -181,11 +182,32 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 )
             )
 
+        matched_candidates = [
+            (score, node)
+            for score, node in local_candidates
+            if score >= LOCAL_MATCH_THRESHOLD
+        ]
+        if matched_candidates:
+            print(
+                f"[rag-worker {self.worker_id}] local match query_id={query_id} "
+                f"threshold={LOCAL_MATCH_THRESHOLD:.4f} "
+                f"matches={len(matched_candidates)}/{len(local_candidates)}",
+                flush=True,
+            )
+        else:
+            best_score = local_candidates[0][0] if local_candidates else None
+            best_score_text = f"{best_score:.4f}" if best_score is not None else "none"
+            print(
+                f"[rag-worker {self.worker_id}] no local match query_id={query_id} "
+                f"threshold={LOCAL_MATCH_THRESHOLD:.4f} best_score={best_score_text}",
+                flush=True,
+            )
+
         self.start_pageindex_retrieval_task(
             query_id,
             request.query,
             coordinator_addr,
-            local_candidates,
+            matched_candidates,
         )
         return rag_pb2.RouteQueryReply(
             worker_id=self.worker_id,

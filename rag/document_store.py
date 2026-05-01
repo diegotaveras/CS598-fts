@@ -80,6 +80,7 @@ class LocalDocumentStore:
         self.user_embedding_model: str | None = None
         self.user_embedding_dimension: int = 0
         self.user_embedding_source_node_ids: list[str] = []
+        self.route_similarity_debug = os.getenv("RAG_ROUTE_SIMILARITY_DEBUG", "0") == "1"
 
     def load(self):
         self.nodes.clear()
@@ -140,19 +141,92 @@ class LocalDocumentStore:
 
     def embed_root_pageindex_nodes(self, embedder, max_length: int = 512):
         roots = self.root_pageindex_nodes()
-        for node in roots:
-            text = self._embedding_text_for_root(node)
+        for root in roots:
+            embedded_tree_nodes = self.embed_pageindex_tree_nodes(
+                root,
+                embedder,
+                max_length=max_length,
+            )
+            if embedded_tree_nodes:
+                self.calculate_root_tree_embedding(root, embedded_tree_nodes)
+                continue
+
+            text = self._embedding_text_for_root(root)
+            if self.route_similarity_debug:
+                print(
+                    f"[rag-store {self.worker_id}] root embedding text "
+                    f"node_id={root.node_id}:\n{text}",
+                    flush=True,
+                )
             result = embedder.embed_text(text, max_length=max_length)
-            node.embedding = result.embedding
-            node.metadata["embedding_model"] = result.model_name
-            node.metadata["embedding_dimension"] = len(result.embedding)
+            root.embedding = result.embedding
+            root.metadata["embedding_model"] = result.model_name
+            root.metadata["embedding_dimension"] = len(result.embedding)
+            root.metadata["embedding_source_node_count"] = 1
+            root.metadata["embedding_source_node_ids"] = [root.node_id]
             print(
-                f"[rag-store {self.worker_id}] embedded PageIndex root "
-                f"node_id={node.node_id} dimension={len(result.embedding)}",
+                f"[rag-store {self.worker_id}] embedded PageIndex root fallback "
+                f"node_id={root.node_id} dimension={len(result.embedding)}",
                 flush=True,
             )
         self.calculate_user_embedding()
         return roots
+
+    def embed_pageindex_tree_nodes(self, root: PageIndexNode, embedder, max_length: int = 512):
+        embedded_nodes = []
+        for node in self._descendant_pageindex_nodes(root):
+            text = self._embedding_text_for_pageindex_node(node)
+
+            result = embedder.embed_text(text, max_length=max_length)
+            node.embedding = result.embedding
+            node.metadata["embedding_model"] = result.model_name
+            node.metadata["embedding_dimension"] = len(result.embedding)
+            embedded_nodes.append(node)
+            print(
+                f"[rag-store {self.worker_id}] embedded PageIndex tree node "
+                f"root_id={root.node_id} node_id={node.node_id} "
+                f"dimension={len(result.embedding)}",
+                flush=True,
+            )
+        return embedded_nodes
+
+    def calculate_root_tree_embedding(
+        self,
+        root: PageIndexNode,
+        embedded_tree_nodes: list[PageIndexNode],
+    ):
+        first_dimension = len(embedded_tree_nodes[0].embedding)
+        compatible_nodes = [
+            node
+            for node in embedded_tree_nodes
+            if len(node.embedding) == first_dimension
+        ]
+        if len(compatible_nodes) != len(embedded_tree_nodes):
+            skipped = len(embedded_tree_nodes) - len(compatible_nodes)
+            print(
+                f"[rag-store {self.worker_id}] skipped {skipped} tree node embeddings "
+                f"with mismatched dimensions for root node_id={root.node_id}",
+                flush=True,
+            )
+
+        embedding_matrix = np.asarray(
+            [node.embedding for node in compatible_nodes],
+            dtype=np.float64,
+        )
+        root.embedding = embedding_matrix.mean(axis=0).astype(float).tolist()
+        root.metadata["embedding_model"] = compatible_nodes[0].metadata.get("embedding_model")
+        root.metadata["embedding_dimension"] = first_dimension
+        root.metadata["embedding_source_node_count"] = len(compatible_nodes)
+        root.metadata["embedding_source_node_ids"] = [
+            node.node_id
+            for node in compatible_nodes
+        ]
+        print(
+            f"[rag-store {self.worker_id}] calculated PageIndex root tree embedding "
+            f"node_id={root.node_id} dimension={first_dimension} "
+            f"source_nodes={len(compatible_nodes)}",
+            flush=True,
+        )
 
     def calculate_user_embedding(self):
         embedded_roots = [
@@ -221,6 +295,35 @@ class LocalDocumentStore:
                 f"Child: {child.title}\nSummary: {child.description}"
             )
         return "\n\n".join(parts)
+
+    def _embedding_text_for_pageindex_node(self, node: PageIndexNode) -> str:
+        parts = [
+            f"Title: {node.title}",
+            f"Summary: {node.description}",
+        ]
+        if node.content and node.content != node.description:
+            parts.append(f"Content: {node.content}")
+        parent = self.nodes.get(node.parent_id) if node.parent_id else None
+        if parent is not None:
+            parts.append(f"Parent: {parent.title}")
+        return "\n\n".join(parts)
+
+    def _descendant_pageindex_nodes(self, root: PageIndexNode) -> list[PageIndexNode]:
+        descendants = []
+        seen = set()
+        stack = list(reversed(root.child_ids))
+        while stack:
+            node_id = stack.pop()
+            if node_id in seen:
+                continue
+            seen.add(node_id)
+            node = self.nodes.get(node_id)
+            if node is None:
+                continue
+            if node.metadata.get("node_type") == "pageindex_node":
+                descendants.append(node)
+            stack.extend(reversed(node.child_ids))
+        return descendants
 
     def _load_manifest(self):
         if not self.manifest_path.exists():
@@ -381,10 +484,11 @@ class LocalDocumentStore:
         child_ids = [self._pageindex_node_id(doc_key, child) for child in children]
         content = raw_node.get("text") or raw_node.get("content") or ""
         description = (
-            raw_node.get("summary")
+            raw_node.get("text")
+            or raw_node.get("summary")
             or raw_node.get("description")
             or raw_node.get("node_summary")
-            or content[:300]
+            or content
         )
         raw_metadata = raw_node.get("metadata") if isinstance(raw_node.get("metadata"), dict) else {}
         metadata = {
@@ -414,6 +518,13 @@ class LocalDocumentStore:
             return [(1.0, node) for node in nodes[:top_k]]
 
         query_embedding = embedder.embed_text(query, max_length=max_length).embedding
+        if self.route_similarity_debug and self.user_embedding is not None:
+            user_score = cosine_similarity(query_embedding, self.user_embedding)
+            print(
+                f"[rag-store {self.worker_id}] query-to-user cosine "
+                f"score={user_score:.4f} query={query}",
+                flush=True,
+            )
         return self._find_closest_nodes(query_embedding, top_k)
 
     def _find_closest_nodes(self, query_embedding: list[float], top_k: int):
@@ -425,6 +536,14 @@ class LocalDocumentStore:
             scored.append((score, node))
 
         scored.sort(key=lambda item: item[0], reverse=True)
+        if self.route_similarity_debug:
+            for rank, (score, node) in enumerate(scored, start=1):
+                print(
+                    f"[rag-store {self.worker_id}] query-to-document-root cosine "
+                    f"rank={rank} score={score:.4f} node={node.node_id} "
+                    f"title={node.title} description={node.description}",
+                    flush=True,
+                )
         return scored[:top_k]
 
     def get_nodes(self, node_ids: list[str]):
