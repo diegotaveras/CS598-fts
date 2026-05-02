@@ -80,7 +80,7 @@ class LocalDocumentStore:
         self.user_embedding_model: str | None = None
         self.user_embedding_dimension: int = 0
         self.user_embedding_source_node_ids: list[str] = []
-        self.route_similarity_debug = os.getenv("RAG_ROUTE_SIMILARITY_DEBUG", "0") == "1"
+        self.route_similarity_debug = os.getenv("RAG_ROUTE_SIMILARITY_DEBUG", "1") == "1"
 
     def load(self):
         self.nodes.clear()
