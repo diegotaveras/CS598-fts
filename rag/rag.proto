@@ -4,6 +4,7 @@ package rag;
 
 service RagService {
   rpc Ping(RagPingRequest) returns (RagPingReply);
+  rpc JoinTree(JoinTreeRequest) returns (JoinTreeReply);
   rpc RegisterUserEmbedding(RegisterUserEmbeddingRequest) returns (RegisterUserEmbeddingReply);
   rpc GetUserEmbeddingRegistry(GetUserEmbeddingRegistryRequest) returns (GetUserEmbeddingRegistryReply);
   rpc RouteQuery(RouteQueryRequest) returns (RouteQueryReply);
@@ -32,6 +33,25 @@ message RegisterUserEmbeddingRequest {
 message RegisterUserEmbeddingReply {
   string worker_id = 1;
   int32 registered_count = 2;
+}
+
+message JoinTreeRequest {
+  string worker_id = 1;
+  string advertise_addr = 2;
+  repeated double embedding = 3;
+  string embedding_model = 4;
+  int32 embedding_dimension = 5;
+  int32 source_root_count = 6;
+  repeated string source_node_ids = 7;
+}
+
+message JoinTreeReply {
+  string root_worker_id = 1;
+  bool accepted = 2;
+  int32 joined_count = 3;
+  int32 expected_count = 4;
+  int64 routing_epoch = 5;
+  repeated UserEmbeddingRecord closest_users = 6;
 }
 
 message UserEmbeddingRecord {

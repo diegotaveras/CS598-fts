@@ -42,6 +42,13 @@ NEIGHBORS = [
     for neighbor in os.getenv("RAG_NEIGHBORS", "").split(",")
     if neighbor.strip()
 ]
+ROUTING_TREE_EXPECTED_USERS = int(
+    os.getenv("RAG_ROUTING_TREE_EXPECTED_USERS", str(len(NEIGHBORS) + 1))
+)
+ROUTING_TREE_RECORD_LIMIT = int(os.getenv("RAG_ROUTING_TREE_RECORD_LIMIT", "50"))
+ROUTING_TREE_DELTA = float(os.getenv("RAG_ROUTING_TREE_DELTA", "0.0005"))
+ROUTING_TREE_CLOSEST_USERS = int(os.getenv("RAG_ROUTING_TREE_CLOSEST_USERS", "2"))
+ROUTING_TREE_CANDIDATE_USERS = int(os.getenv("RAG_ROUTING_TREE_CANDIDATE_USERS", "0"))
 INIT_WORKER_ID = os.getenv("RAG_INIT_WORKER_ID", "node1")
 INIT_ADDR = os.getenv("RAG_INIT_ADDR", "node1:9100")
 USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS = int(
@@ -60,6 +67,12 @@ CHAIN_HOP_MAX_HOPS = int(os.getenv("RAG_CHAIN_HOP_MAX_HOPS", "4"))
 BOOTSTRAP_QUERY = os.getenv("RAG_BOOTSTRAP_QUERY", "")
 BOOTSTRAP_DELAY_SECONDS = float(os.getenv("RAG_BOOTSTRAP_DELAY_SECONDS", "5.0"))
 BOOTSTRAP_QUERY_ID = os.getenv("RAG_BOOTSTRAP_QUERY_ID", "")
+BOOTSTRAP_WAIT_FOR_ROUTING_TREE = (
+    os.getenv("RAG_BOOTSTRAP_WAIT_FOR_ROUTING_TREE", "1") == "1"
+)
+BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS = float(
+    os.getenv("RAG_BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS", "600.0")
+)
 MULTICAST_RETRY_ATTEMPTS = int(os.getenv("RAG_MULTICAST_RETRY_ATTEMPTS", "6"))
 MULTICAST_RETRY_SECONDS = float(os.getenv("RAG_MULTICAST_RETRY_SECONDS", "5.0"))
 
@@ -82,25 +95,50 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         self.summary_tasks = {}
         self.llm_client = None
         self.user_embedding_registry = {}
+        self.routing_epoch = 0
+        self.routing_tree_result = None
+        self.routing_tree_built_for_workers = set()
+        self.closest_user_entries_by_worker = {}
 
     async def Ping(self, request, context):
         return rag_pb2.RagPingReply(worker_id=self.worker_id, status="alive")
 
     async def RegisterUserEmbedding(self, request, context):
         self.record_user_embedding(request)
+        self.maybe_build_routing_tree()
         return rag_pb2.RegisterUserEmbeddingReply(
             worker_id=self.worker_id,
             registered_count=len(self.user_embedding_registry),
         )
 
     async def GetUserEmbeddingRegistry(self, request, context):
+        entries = self.registry_entries_for_requester(request.requester_worker_id)
         return rag_pb2.GetUserEmbeddingRegistryReply(
             worker_id=self.worker_id,
             users=[
                 self.user_embedding_record_from_entry(entry)
-                for entry in self.user_embedding_registry.values()
+                for entry in entries
             ],
         )
+
+    def registry_entries_for_requester(self, requester_worker_id: str):
+        closest_entries = self.closest_user_entries_by_worker.get(requester_worker_id)
+        if closest_entries is not None:
+            print(
+                f"[rag-worker {self.worker_id}] serving routing closest-users "
+                f"requester={requester_worker_id} epoch={self.routing_epoch} "
+                f"count={len(closest_entries)}",
+                flush=True,
+            )
+            return closest_entries
+
+        print(
+            f"[rag-worker {self.worker_id}] serving full user embedding registry "
+            f"requester={requester_worker_id} count={len(self.user_embedding_registry)} "
+            f"routing_epoch={self.routing_epoch}",
+            flush=True,
+        )
+        return list(self.user_embedding_registry.values())
 
     def record_user_embedding(self, request):
         embedding = list(request.embedding)
@@ -133,6 +171,18 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             "source_node_ids": list(record.source_node_ids),
         }
 
+    def user_embedding_entry_from_registration(self, request):
+        embedding = list(request.embedding)
+        return {
+            "worker_id": request.worker_id,
+            "advertise_addr": request.advertise_addr,
+            "embedding": embedding,
+            "embedding_model": request.embedding_model,
+            "embedding_dimension": request.embedding_dimension or len(embedding),
+            "source_root_count": request.source_root_count,
+            "source_node_ids": list(request.source_node_ids),
+        }
+
     def build_user_embedding_registration(self):
         return rag_pb2.RegisterUserEmbeddingRequest(
             worker_id=self.worker_id,
@@ -154,6 +204,98 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             source_root_count=entry.get("source_root_count", 0),
             source_node_ids=entry.get("source_node_ids", []),
         )
+
+    def maybe_build_routing_tree(self):
+        if self.worker_id != INIT_WORKER_ID:
+            return
+        registered_count = len(self.user_embedding_registry)
+        if registered_count < ROUTING_TREE_EXPECTED_USERS:
+            print(
+                f"[rag-worker {self.worker_id}] waiting to build routing tree "
+                f"registered={registered_count}/{ROUTING_TREE_EXPECTED_USERS}",
+                flush=True,
+            )
+            return
+
+        usable_entries = [
+            entry
+            for entry in self.user_embedding_registry.values()
+            if entry.get("embedding")
+        ]
+        worker_ids = {entry["worker_id"] for entry in usable_entries}
+        if not usable_entries:
+            print(
+                f"[rag-worker {self.worker_id}] cannot build routing tree; "
+                "no registered users have embeddings",
+                flush=True,
+            )
+            return
+        if worker_ids == self.routing_tree_built_for_workers:
+            return
+
+        try:
+            from Semantica.tree.script import construct_rag_routing_tree
+
+            records = [
+                {
+                    "worker_id": entry["worker_id"],
+                    "addr": entry["advertise_addr"],
+                    "embedding": entry["embedding"],
+                }
+                for entry in usable_entries
+            ]
+            result = construct_rag_routing_tree(
+                records,
+                record_limit_per_leafnode=ROUTING_TREE_RECORD_LIMIT,
+                delta=ROUTING_TREE_DELTA,
+                closest_user_count=ROUTING_TREE_CLOSEST_USERS,
+                candidate_user_count=(
+                    ROUTING_TREE_CANDIDATE_USERS
+                    if ROUTING_TREE_CANDIDATE_USERS > 0
+                    else None
+                ),
+            )
+        except Exception as exc:
+            print(
+                f"[rag-worker {self.worker_id}] failed to build routing tree: {exc}",
+                flush=True,
+            )
+            return
+
+        self.routing_epoch += 1
+        self.routing_tree_result = result
+        self.routing_tree_built_for_workers = worker_ids
+        self.closest_user_entries_by_worker = {}
+        closest_users = result["closest_users"]
+        for owner_worker_id, closest_records in closest_users.items():
+            entries = []
+            for closest in closest_records:
+                closest_worker_id = closest["worker_id"]
+                entry = self.user_embedding_registry.get(closest_worker_id)
+                if entry is not None:
+                    entries.append(entry)
+            self.closest_user_entries_by_worker[owner_worker_id] = entries
+
+        print(
+            f"[rag-worker {self.worker_id}] built Semantica routing tree "
+            f"epoch={self.routing_epoch} users={len(worker_ids)} "
+            f"leaves={len(result['leaf_members'])} "
+            f"record_limit={ROUTING_TREE_RECORD_LIMIT} "
+            f"closest_k={ROUTING_TREE_CLOSEST_USERS}",
+            flush=True,
+        )
+        print(
+            f"[rag-worker {self.worker_id}] routing tree leaf_members="
+            f"{json.dumps(result['leaf_members'], sort_keys=True)}",
+            flush=True,
+        )
+        for owner_worker_id, entries in sorted(self.closest_user_entries_by_worker.items()):
+            print(
+                f"[rag-worker {self.worker_id}] routing closest-users "
+                f"epoch={self.routing_epoch} worker_id={owner_worker_id} "
+                f"closest={[entry['worker_id'] for entry in entries]}",
+                flush=True,
+            )
 
     async def SendEvidence(self, request, context):
         evidence = self.evidence_by_query.setdefault(request.query_id, [])
@@ -337,8 +479,12 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             query,
             max_length=BERT_MAX_LENGTH,
         ).embedding
+        registry_entries = self.closest_user_entries_by_worker.get(
+            self.worker_id,
+            list(self.user_embedding_registry.values()),
+        )
         scored = []
-        for entry in self.user_embedding_registry.values():
+        for entry in registry_entries:
             worker_id = entry.get("worker_id")
             embedding = entry.get("embedding") or []
             advertise_addr = entry.get("advertise_addr")
@@ -356,7 +502,8 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         score, worker_id, advertise_addr = scored[0]
         print(
             f"[rag-worker {self.worker_id}] chain-hop selected target "
-            f"worker_id={worker_id} addr={advertise_addr} score={score:.4f}",
+            f"worker_id={worker_id} addr={advertise_addr} score={score:.4f} "
+            f"candidate_count={len(registry_entries)}",
             flush=True,
         )
         return advertise_addr
@@ -401,11 +548,24 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                     ),
                     timeout=5.0,
                 )
+            synced_records = []
             for record in reply.users:
+                if record.worker_id == self.worker_id:
+                    continue
+                if record.embedding:
+                    synced_records.append(record)
+            self.user_embedding_registry = {}
+            own_registration = self.build_user_embedding_registration()
+            if own_registration.embedding:
+                self.user_embedding_registry[self.worker_id] = (
+                    self.user_embedding_entry_from_registration(own_registration)
+                )
+            for record in synced_records:
                 self.record_user_embedding_record(record)
             print(
                 f"[rag-worker {self.worker_id}] synced user embedding registry "
-                f"from init={reply.worker_id} registry_size={len(self.user_embedding_registry)}",
+                f"from init={reply.worker_id} registry_size={len(self.user_embedding_registry)} "
+                f"received={len(reply.users)}",
                 flush=True,
             )
             return True
@@ -854,6 +1014,7 @@ async def serve():
 
     servicer = RagWorkerServicer(WORKER_ID, store, NEIGHBORS, bert_embedder)
     servicer.record_user_embedding(servicer.build_user_embedding_registration())
+    servicer.maybe_build_routing_tree()
 
     server = grpc.aio.server()
     rag_pb2_grpc.add_RagServiceServicer_to_server(
@@ -935,6 +1096,8 @@ async def sync_user_embedding_registry_from_init(servicer: RagWorkerServicer):
 
 async def inject_bootstrap_query(servicer: RagWorkerServicer):
     await asyncio.sleep(BOOTSTRAP_DELAY_SECONDS)
+    if BOOTSTRAP_WAIT_FOR_ROUTING_TREE:
+        await wait_for_bootstrap_routing_tree(servicer)
     query_id = BOOTSTRAP_QUERY_ID or str(uuid.uuid4())
     request = rag_pb2.RouteQueryRequest(
         query_id=query_id,
@@ -950,6 +1113,38 @@ async def inject_bootstrap_query(servicer: RagWorkerServicer):
         flush=True,
     )
     await servicer.RouteQuery(request, context=None)
+
+
+async def wait_for_bootstrap_routing_tree(servicer: RagWorkerServicer):
+    if WORKER_ID != INIT_WORKER_ID:
+        return
+
+    deadline = asyncio.get_running_loop().time() + BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS
+    while servicer.routing_epoch == 0:
+        servicer.maybe_build_routing_tree()
+        if servicer.routing_epoch > 0:
+            break
+        if asyncio.get_running_loop().time() >= deadline:
+            print(
+                f"[rag-worker {WORKER_ID}] bootstrap routing-tree wait timed out "
+                f"registered={len(servicer.user_embedding_registry)}/"
+                f"{ROUTING_TREE_EXPECTED_USERS}; injecting query anyway",
+                flush=True,
+            )
+            return
+        print(
+            f"[rag-worker {WORKER_ID}] waiting for routing tree before bootstrap "
+            f"registered={len(servicer.user_embedding_registry)}/"
+            f"{ROUTING_TREE_EXPECTED_USERS}",
+            flush=True,
+        )
+        await asyncio.sleep(2.0)
+
+    print(
+        f"[rag-worker {WORKER_ID}] routing tree ready for bootstrap "
+        f"epoch={servicer.routing_epoch}",
+        flush=True,
+    )
 
 
 def main():

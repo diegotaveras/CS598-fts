@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rrag/rag.proto\x12\x03rag\" \n\x0eRagPingRequest\x12\x0e\n\x06sender\x18\x01 \x01(\t\"1\n\x0cRagPingReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\"\xc6\x01\n\x1cRegisterUserEmbeddingRequest\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0e\x61\x64vertise_addr\x18\x02 \x01(\t\x12\x11\n\tembedding\x18\x03 \x03(\x01\x12\x17\n\x0f\x65mbedding_model\x18\x04 \x01(\t\x12\x1b\n\x13\x65mbedding_dimension\x18\x05 \x01(\x05\x12\x19\n\x11source_root_count\x18\x06 \x01(\x05\x12\x17\n\x0fsource_node_ids\x18\x07 \x03(\t\"I\n\x1aRegisterUserEmbeddingReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x18\n\x10registered_count\x18\x02 \x01(\x05\"\xbd\x01\n\x13UserEmbeddingRecord\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0e\x61\x64vertise_addr\x18\x02 \x01(\t\x12\x11\n\tembedding\x18\x03 \x03(\x01\x12\x17\n\x0f\x65mbedding_model\x18\x04 \x01(\t\x12\x1b\n\x13\x65mbedding_dimension\x18\x05 \x01(\x05\x12\x19\n\x11source_root_count\x18\x06 \x01(\x05\x12\x17\n\x0fsource_node_ids\x18\x07 \x03(\t\">\n\x1fGetUserEmbeddingRegistryRequest\x12\x1b\n\x13requester_worker_id\x18\x01 \x01(\t\"[\n\x1dGetUserEmbeddingRegistryReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\'\n\x05users\x18\x02 \x03(\x0b\x32\x18.rag.UserEmbeddingRecord\"\x9d\x01\n\x11RouteQueryRequest\x12\x10\n\x08query_id\x18\x01 \x01(\t\x12\r\n\x05query\x18\x02 \x01(\t\x12\r\n\x05top_k\x18\x03 \x01(\x05\x12\x18\n\x10\x63oordinator_addr\x18\x04 \x01(\t\x12\x10\n\x08\x63urr_hop\x18\x05 \x01(\x05\x12\x10\n\x08max_hops\x18\x06 \x01(\x05\x12\x1a\n\x12visited_worker_ids\x18\x07 \x03(\t\"\x8e\x01\n\rNodeCandidate\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x0f\n\x07node_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\r\n\x05score\x18\x04 \x01(\x01\x12\x0f\n\x07preview\x18\x05 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x06 \x01(\t\x12\x15\n\rmetadata_json\x18\x07 \x01(\t\"L\n\x0fRouteQueryReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12&\n\ncandidates\x18\x02 \x03(\x0b\x32\x12.rag.NodeCandidate\"e\n\x08\x45vidence\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x0f\n\x07node_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x04 \x01(\t\x12\x15\n\rmetadata_json\x18\x05 \x01(\t\"H\n\x13SendEvidenceRequest\x12\x10\n\x08query_id\x18\x01 \x01(\t\x12\x1f\n\x08\x65vidence\x18\x02 \x03(\x0b\x32\r.rag.Evidence\">\n\x11SendEvidenceReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0e\x61\x63\x63\x65pted_count\x18\x02 \x01(\x05\x32\xfd\x02\n\nRagService\x12.\n\x04Ping\x12\x13.rag.RagPingRequest\x1a\x11.rag.RagPingReply\x12[\n\x15RegisterUserEmbedding\x12!.rag.RegisterUserEmbeddingRequest\x1a\x1f.rag.RegisterUserEmbeddingReply\x12\x64\n\x18GetUserEmbeddingRegistry\x12$.rag.GetUserEmbeddingRegistryRequest\x1a\".rag.GetUserEmbeddingRegistryReply\x12:\n\nRouteQuery\x12\x16.rag.RouteQueryRequest\x1a\x14.rag.RouteQueryReply\x12@\n\x0cSendEvidence\x12\x18.rag.SendEvidenceRequest\x1a\x16.rag.SendEvidenceReplyb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rrag/rag.proto\x12\x03rag\" \n\x0eRagPingRequest\x12\x0e\n\x06sender\x18\x01 \x01(\t\"1\n\x0cRagPingReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\"\xc6\x01\n\x1cRegisterUserEmbeddingRequest\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0e\x61\x64vertise_addr\x18\x02 \x01(\t\x12\x11\n\tembedding\x18\x03 \x03(\x01\x12\x17\n\x0f\x65mbedding_model\x18\x04 \x01(\t\x12\x1b\n\x13\x65mbedding_dimension\x18\x05 \x01(\x05\x12\x19\n\x11source_root_count\x18\x06 \x01(\x05\x12\x17\n\x0fsource_node_ids\x18\x07 \x03(\t\"I\n\x1aRegisterUserEmbeddingReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x18\n\x10registered_count\x18\x02 \x01(\x05\"\xb9\x01\n\x0fJoinTreeRequest\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0e\x61\x64vertise_addr\x18\x02 \x01(\t\x12\x11\n\tembedding\x18\x03 \x03(\x01\x12\x17\n\x0f\x65mbedding_model\x18\x04 \x01(\t\x12\x1b\n\x13\x65mbedding_dimension\x18\x05 \x01(\x05\x12\x19\n\x11source_root_count\x18\x06 \x01(\x05\x12\x17\n\x0fsource_node_ids\x18\x07 \x03(\t\"\xaf\x01\n\rJoinTreeReply\x12\x16\n\x0eroot_worker_id\x18\x01 \x01(\t\x12\x10\n\x08\x61\x63\x63\x65pted\x18\x02 \x01(\x08\x12\x14\n\x0cjoined_count\x18\x03 \x01(\x05\x12\x16\n\x0e\x65xpected_count\x18\x04 \x01(\x05\x12\x15\n\rrouting_epoch\x18\x05 \x01(\x03\x12/\n\rclosest_users\x18\x06 \x03(\x0b\x32\x18.rag.UserEmbeddingRecord\"\xbd\x01\n\x13UserEmbeddingRecord\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0e\x61\x64vertise_addr\x18\x02 \x01(\t\x12\x11\n\tembedding\x18\x03 \x03(\x01\x12\x17\n\x0f\x65mbedding_model\x18\x04 \x01(\t\x12\x1b\n\x13\x65mbedding_dimension\x18\x05 \x01(\x05\x12\x19\n\x11source_root_count\x18\x06 \x01(\x05\x12\x17\n\x0fsource_node_ids\x18\x07 \x03(\t\">\n\x1fGetUserEmbeddingRegistryRequest\x12\x1b\n\x13requester_worker_id\x18\x01 \x01(\t\"[\n\x1dGetUserEmbeddingRegistryReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\'\n\x05users\x18\x02 \x03(\x0b\x32\x18.rag.UserEmbeddingRecord\"\x9d\x01\n\x11RouteQueryRequest\x12\x10\n\x08query_id\x18\x01 \x01(\t\x12\r\n\x05query\x18\x02 \x01(\t\x12\r\n\x05top_k\x18\x03 \x01(\x05\x12\x18\n\x10\x63oordinator_addr\x18\x04 \x01(\t\x12\x10\n\x08\x63urr_hop\x18\x05 \x01(\x05\x12\x10\n\x08max_hops\x18\x06 \x01(\x05\x12\x1a\n\x12visited_worker_ids\x18\x07 \x03(\t\"\x8e\x01\n\rNodeCandidate\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x0f\n\x07node_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\r\n\x05score\x18\x04 \x01(\x01\x12\x0f\n\x07preview\x18\x05 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x06 \x01(\t\x12\x15\n\rmetadata_json\x18\x07 \x01(\t\"L\n\x0fRouteQueryReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12&\n\ncandidates\x18\x02 \x03(\x0b\x32\x12.rag.NodeCandidate\"e\n\x08\x45vidence\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x0f\n\x07node_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x04 \x01(\t\x12\x15\n\rmetadata_json\x18\x05 \x01(\t\"H\n\x13SendEvidenceRequest\x12\x10\n\x08query_id\x18\x01 \x01(\t\x12\x1f\n\x08\x65vidence\x18\x02 \x03(\x0b\x32\r.rag.Evidence\">\n\x11SendEvidenceReply\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0e\x61\x63\x63\x65pted_count\x18\x02 \x01(\x05\x32\xb3\x03\n\nRagService\x12.\n\x04Ping\x12\x13.rag.RagPingRequest\x1a\x11.rag.RagPingReply\x12\x34\n\x08JoinTree\x12\x14.rag.JoinTreeRequest\x1a\x12.rag.JoinTreeReply\x12[\n\x15RegisterUserEmbedding\x12!.rag.RegisterUserEmbeddingRequest\x1a\x1f.rag.RegisterUserEmbeddingReply\x12\x64\n\x18GetUserEmbeddingRegistry\x12$.rag.GetUserEmbeddingRegistryRequest\x1a\".rag.GetUserEmbeddingRegistryReply\x12:\n\nRouteQuery\x12\x16.rag.RouteQueryRequest\x1a\x14.rag.RouteQueryReply\x12@\n\x0cSendEvidence\x12\x18.rag.SendEvidenceRequest\x1a\x16.rag.SendEvidenceReplyb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -39,24 +39,28 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_REGISTERUSEREMBEDDINGREQUEST']._serialized_end=306
   _globals['_REGISTERUSEREMBEDDINGREPLY']._serialized_start=308
   _globals['_REGISTERUSEREMBEDDINGREPLY']._serialized_end=381
-  _globals['_USEREMBEDDINGRECORD']._serialized_start=384
-  _globals['_USEREMBEDDINGRECORD']._serialized_end=573
-  _globals['_GETUSEREMBEDDINGREGISTRYREQUEST']._serialized_start=575
-  _globals['_GETUSEREMBEDDINGREGISTRYREQUEST']._serialized_end=637
-  _globals['_GETUSEREMBEDDINGREGISTRYREPLY']._serialized_start=639
-  _globals['_GETUSEREMBEDDINGREGISTRYREPLY']._serialized_end=730
-  _globals['_ROUTEQUERYREQUEST']._serialized_start=733
-  _globals['_ROUTEQUERYREQUEST']._serialized_end=890
-  _globals['_NODECANDIDATE']._serialized_start=893
-  _globals['_NODECANDIDATE']._serialized_end=1035
-  _globals['_ROUTEQUERYREPLY']._serialized_start=1037
-  _globals['_ROUTEQUERYREPLY']._serialized_end=1113
-  _globals['_EVIDENCE']._serialized_start=1115
-  _globals['_EVIDENCE']._serialized_end=1216
-  _globals['_SENDEVIDENCEREQUEST']._serialized_start=1218
-  _globals['_SENDEVIDENCEREQUEST']._serialized_end=1290
-  _globals['_SENDEVIDENCEREPLY']._serialized_start=1292
-  _globals['_SENDEVIDENCEREPLY']._serialized_end=1354
-  _globals['_RAGSERVICE']._serialized_start=1357
-  _globals['_RAGSERVICE']._serialized_end=1738
+  _globals['_JOINTREEREQUEST']._serialized_start=384
+  _globals['_JOINTREEREQUEST']._serialized_end=569
+  _globals['_JOINTREEREPLY']._serialized_start=572
+  _globals['_JOINTREEREPLY']._serialized_end=747
+  _globals['_USEREMBEDDINGRECORD']._serialized_start=750
+  _globals['_USEREMBEDDINGRECORD']._serialized_end=939
+  _globals['_GETUSEREMBEDDINGREGISTRYREQUEST']._serialized_start=941
+  _globals['_GETUSEREMBEDDINGREGISTRYREQUEST']._serialized_end=1003
+  _globals['_GETUSEREMBEDDINGREGISTRYREPLY']._serialized_start=1005
+  _globals['_GETUSEREMBEDDINGREGISTRYREPLY']._serialized_end=1096
+  _globals['_ROUTEQUERYREQUEST']._serialized_start=1099
+  _globals['_ROUTEQUERYREQUEST']._serialized_end=1256
+  _globals['_NODECANDIDATE']._serialized_start=1259
+  _globals['_NODECANDIDATE']._serialized_end=1401
+  _globals['_ROUTEQUERYREPLY']._serialized_start=1403
+  _globals['_ROUTEQUERYREPLY']._serialized_end=1479
+  _globals['_EVIDENCE']._serialized_start=1481
+  _globals['_EVIDENCE']._serialized_end=1582
+  _globals['_SENDEVIDENCEREQUEST']._serialized_start=1584
+  _globals['_SENDEVIDENCEREQUEST']._serialized_end=1656
+  _globals['_SENDEVIDENCEREPLY']._serialized_start=1658
+  _globals['_SENDEVIDENCEREPLY']._serialized_end=1720
+  _globals['_RAGSERVICE']._serialized_start=1723
+  _globals['_RAGSERVICE']._serialized_end=2158
 # @@protoc_insertion_point(module_scope)

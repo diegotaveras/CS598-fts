@@ -39,6 +39,11 @@ class RagServiceStub(object):
                 request_serializer=rag_dot_rag__pb2.RagPingRequest.SerializeToString,
                 response_deserializer=rag_dot_rag__pb2.RagPingReply.FromString,
                 _registered_method=True)
+        self.JoinTree = channel.unary_unary(
+                '/rag.RagService/JoinTree',
+                request_serializer=rag_dot_rag__pb2.JoinTreeRequest.SerializeToString,
+                response_deserializer=rag_dot_rag__pb2.JoinTreeReply.FromString,
+                _registered_method=True)
         self.RegisterUserEmbedding = channel.unary_unary(
                 '/rag.RagService/RegisterUserEmbedding',
                 request_serializer=rag_dot_rag__pb2.RegisterUserEmbeddingRequest.SerializeToString,
@@ -65,6 +70,12 @@ class RagServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def Ping(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def JoinTree(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -101,6 +112,11 @@ def add_RagServiceServicer_to_server(servicer, server):
                     servicer.Ping,
                     request_deserializer=rag_dot_rag__pb2.RagPingRequest.FromString,
                     response_serializer=rag_dot_rag__pb2.RagPingReply.SerializeToString,
+            ),
+            'JoinTree': grpc.unary_unary_rpc_method_handler(
+                    servicer.JoinTree,
+                    request_deserializer=rag_dot_rag__pb2.JoinTreeRequest.FromString,
+                    response_serializer=rag_dot_rag__pb2.JoinTreeReply.SerializeToString,
             ),
             'RegisterUserEmbedding': grpc.unary_unary_rpc_method_handler(
                     servicer.RegisterUserEmbedding,
@@ -150,6 +166,33 @@ class RagService(object):
             '/rag.RagService/Ping',
             rag_dot_rag__pb2.RagPingRequest.SerializeToString,
             rag_dot_rag__pb2.RagPingReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def JoinTree(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rag.RagService/JoinTree',
+            rag_dot_rag__pb2.JoinTreeRequest.SerializeToString,
+            rag_dot_rag__pb2.JoinTreeReply.FromString,
             options,
             channel_credentials,
             insecure,
