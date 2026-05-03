@@ -5,6 +5,7 @@ package rag;
 service RagService {
   rpc Ping(RagPingRequest) returns (RagPingReply);
   rpc JoinTree(JoinTreeRequest) returns (JoinTreeReply);
+  rpc InstallRoutingTreeNode(InstallRoutingTreeNodeRequest) returns (InstallRoutingTreeNodeReply);
   rpc RegisterUserEmbedding(RegisterUserEmbeddingRequest) returns (RegisterUserEmbeddingReply);
   rpc GetUserEmbeddingRegistry(GetUserEmbeddingRegistryRequest) returns (GetUserEmbeddingRegistryReply);
   rpc RouteQuery(RouteQueryRequest) returns (RouteQueryReply);
@@ -43,6 +44,7 @@ message JoinTreeRequest {
   int32 embedding_dimension = 5;
   int32 source_root_count = 6;
   repeated string source_node_ids = 7;
+  string tree_node_id = 8;
 }
 
 message JoinTreeReply {
@@ -52,6 +54,38 @@ message JoinTreeReply {
   int32 expected_count = 4;
   int64 routing_epoch = 5;
   repeated UserEmbeddingRecord closest_users = 6;
+  string tree_node_id = 7;
+  string custodian_worker_id = 8;
+  string custodian_addr = 9;
+}
+
+message RoutingTreeNodeState {
+  string node_id = 1;
+  string kind = 2;
+  int32 depth = 3;
+  string parent_id = 4;
+  string custodian_worker_id = 5;
+  string custodian_addr = 6;
+  repeated UserEmbeddingRecord members = 7;
+  string left_child_id = 8;
+  string right_child_id = 9;
+  string left_custodian_worker_id = 10;
+  string left_custodian_addr = 11;
+  string right_custodian_worker_id = 12;
+  string right_custodian_addr = 13;
+  repeated double centroid_left = 14;
+  repeated double centroid_right = 15;
+}
+
+message InstallRoutingTreeNodeRequest {
+  string sender_worker_id = 1;
+  RoutingTreeNodeState node = 2;
+}
+
+message InstallRoutingTreeNodeReply {
+  string worker_id = 1;
+  bool accepted = 2;
+  string node_id = 3;
 }
 
 message UserEmbeddingRecord {

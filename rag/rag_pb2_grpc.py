@@ -44,6 +44,11 @@ class RagServiceStub(object):
                 request_serializer=rag_dot_rag__pb2.JoinTreeRequest.SerializeToString,
                 response_deserializer=rag_dot_rag__pb2.JoinTreeReply.FromString,
                 _registered_method=True)
+        self.InstallRoutingTreeNode = channel.unary_unary(
+                '/rag.RagService/InstallRoutingTreeNode',
+                request_serializer=rag_dot_rag__pb2.InstallRoutingTreeNodeRequest.SerializeToString,
+                response_deserializer=rag_dot_rag__pb2.InstallRoutingTreeNodeReply.FromString,
+                _registered_method=True)
         self.RegisterUserEmbedding = channel.unary_unary(
                 '/rag.RagService/RegisterUserEmbedding',
                 request_serializer=rag_dot_rag__pb2.RegisterUserEmbeddingRequest.SerializeToString,
@@ -76,6 +81,12 @@ class RagServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def JoinTree(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def InstallRoutingTreeNode(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -117,6 +128,11 @@ def add_RagServiceServicer_to_server(servicer, server):
                     servicer.JoinTree,
                     request_deserializer=rag_dot_rag__pb2.JoinTreeRequest.FromString,
                     response_serializer=rag_dot_rag__pb2.JoinTreeReply.SerializeToString,
+            ),
+            'InstallRoutingTreeNode': grpc.unary_unary_rpc_method_handler(
+                    servicer.InstallRoutingTreeNode,
+                    request_deserializer=rag_dot_rag__pb2.InstallRoutingTreeNodeRequest.FromString,
+                    response_serializer=rag_dot_rag__pb2.InstallRoutingTreeNodeReply.SerializeToString,
             ),
             'RegisterUserEmbedding': grpc.unary_unary_rpc_method_handler(
                     servicer.RegisterUserEmbedding,
@@ -193,6 +209,33 @@ class RagService(object):
             '/rag.RagService/JoinTree',
             rag_dot_rag__pb2.JoinTreeRequest.SerializeToString,
             rag_dot_rag__pb2.JoinTreeReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def InstallRoutingTreeNode(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rag.RagService/InstallRoutingTreeNode',
+            rag_dot_rag__pb2.InstallRoutingTreeNodeRequest.SerializeToString,
+            rag_dot_rag__pb2.InstallRoutingTreeNodeReply.FromString,
             options,
             channel_credentials,
             insecure,
