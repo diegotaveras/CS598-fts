@@ -2,9 +2,11 @@ import asyncio
 import json
 import os
 import uuid
+from dataclasses import dataclass, field
 from enum import Enum
 
 import grpc
+import numpy as np
 from grpc_reflection.v1alpha import reflection
 
 from rag import rag_pb2, rag_pb2_grpc
@@ -14,7 +16,6 @@ from rag.llm_client import build_inference_client_from_env
 
 
 class RoutingMode(str, Enum):
-    BATCH_REGISTRY = "batch_registry"
     JOIN_TREE = "join_tree"
 
     @classmethod
@@ -25,6 +26,57 @@ class RoutingMode(str, Enum):
                 return mode
         valid_modes = ", ".join(mode.value for mode in cls)
         raise ValueError(f"Invalid RAG_ROUTING_MODE={value!r}; expected one of: {valid_modes}")
+
+
+@dataclass
+class RoutingTreeNode:
+    node_id: str
+    kind: str
+    depth: int
+    parent_id: str | None = None
+    custodian_worker_id: str = ""
+    custodian_addr: str = ""
+    member_worker_ids: list[str] = field(default_factory=list)
+    left_child_id: str = ""
+    right_child_id: str = ""
+    left_custodian_worker_id: str = ""
+    left_custodian_addr: str = ""
+    right_custodian_worker_id: str = ""
+    right_custodian_addr: str = ""
+    centroid_left: list[float] = field(default_factory=list)
+    centroid_right: list[float] = field(default_factory=list)
+
+
+def _embedding_array(embedding) -> np.ndarray:
+    arr = np.asarray(embedding, dtype=np.float64)
+    if arr.ndim != 1:
+        arr = arr.reshape(-1)
+    norm = np.linalg.norm(arr)
+    if norm == 0.0:
+        return arr
+    return arr / norm
+
+
+def _two_means(embeddings: np.ndarray, max_iter: int = 25):
+    if embeddings.shape[0] < 2:
+        labels = np.zeros(embeddings.shape[0], dtype=int)
+        return labels, np.vstack([embeddings[0], embeddings[0]])
+
+    centroid_left = embeddings[0].copy()
+    centroid_right = embeddings[int(np.argmax(np.linalg.norm(embeddings - centroid_left, axis=1)))].copy()
+    labels = np.zeros(embeddings.shape[0], dtype=int)
+    for _ in range(max_iter):
+        left_distances = np.linalg.norm(embeddings - centroid_left, axis=1)
+        right_distances = np.linalg.norm(embeddings - centroid_right, axis=1)
+        next_labels = (right_distances < left_distances).astype(int)
+        if np.array_equal(labels, next_labels):
+            break
+        labels = next_labels
+        if np.any(labels == 0):
+            centroid_left = embeddings[labels == 0].mean(axis=0)
+        if np.any(labels == 1):
+            centroid_right = embeddings[labels == 1].mean(axis=0)
+    return labels, np.vstack([centroid_left, centroid_right])
 
 
 WORKER_ID = os.getenv("RAG_WORKER_ID", os.getenv("HOSTNAME", "rag-worker"))
@@ -60,7 +112,7 @@ NEIGHBORS = [
 ROUTING_TREE_EXPECTED_USERS = int(
     os.getenv("RAG_ROUTING_TREE_EXPECTED_USERS", str(len(NEIGHBORS) + 1))
 )
-ROUTING_TREE_RECORD_LIMIT = int(os.getenv("RAG_ROUTING_TREE_RECORD_LIMIT", "50"))
+ROUTING_TREE_RECORD_LIMIT = int(os.getenv("RAG_ROUTING_TREE_RECORD_LIMIT", "2"))
 ROUTING_TREE_DELTA = float(os.getenv("RAG_ROUTING_TREE_DELTA", "0.0005"))
 ROUTING_TREE_CLOSEST_USERS = int(os.getenv("RAG_ROUTING_TREE_CLOSEST_USERS", "2"))
 ROUTING_TREE_CANDIDATE_USERS = int(os.getenv("RAG_ROUTING_TREE_CANDIDATE_USERS", "0"))
@@ -116,6 +168,10 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         self.routing_tree_built_for_workers = set()
         self.closest_user_entries_by_worker = {}
         self.joined_tree_users = {}
+        self.routing_tree_nodes = {}
+        self.routing_tree_inserted_workers = set()
+        self.next_routing_tree_node_id = 0
+        self.routing_tree_root_node_id = "root"
 
     async def Ping(self, request, context):
         return rag_pb2.RagPingReply(worker_id=self.worker_id, status="alive")
@@ -135,7 +191,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 routing_epoch=self.routing_epoch,
             )
 
-        self.record_join_tree_user(request)
+        self.record_routing_tree_join(request)
         closest_entries = self.closest_user_entries_by_worker.get(request.worker_id, [])
         return rag_pb2.JoinTreeReply(
             root_worker_id=self.worker_id,
@@ -151,7 +207,6 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
 
     async def RegisterUserEmbedding(self, request, context):
         self.record_user_embedding(request)
-        self.maybe_build_routing_tree()
         return rag_pb2.RegisterUserEmbeddingReply(
             worker_id=self.worker_id,
             registered_count=len(self.user_embedding_registry),
@@ -178,7 +233,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             )
             return closest_entries
 
-        if ROUTING_MODE == RoutingMode.JOIN_TREE and self.routing_epoch == 0:
+        if self.routing_epoch == 0:
             print(
                 f"[rag-worker {self.worker_id}] routing closest-users not ready "
                 f"requester={requester_worker_id} "
@@ -215,18 +270,21 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             flush=True,
         )
 
-    def record_join_tree_user(self, request):
+    def record_routing_tree_join(self, request):
         entry = self.user_embedding_entry_from_registration(request)
+        already_joined = request.worker_id in self.joined_tree_users
         self.joined_tree_users[request.worker_id] = entry
         self.user_embedding_registry[request.worker_id] = entry
         print(
             f"[rag-worker {self.worker_id}] JoinTree accepted "
             f"worker_id={request.worker_id} addr={request.advertise_addr} "
             f"dimension={entry['embedding_dimension']} "
-            f"joined={len(self.joined_tree_users)}/{ROUTING_TREE_EXPECTED_USERS}",
+            f"joined={len(self.joined_tree_users)}/{ROUTING_TREE_EXPECTED_USERS} "
+            f"already_joined={already_joined}",
             flush=True,
         )
-        self.maybe_build_routing_tree()
+        if not already_joined:
+            self.insert_routing_tree_peer(entry)
 
     def record_user_embedding_record(self, record):
         self.user_embedding_registry[record.worker_id] = {
@@ -262,7 +320,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             source_node_ids=self.store.user_embedding_source_node_ids,
         )
 
-    def build_join_tree_request(self):
+    def build_routing_tree_join_request(self):
         return rag_pb2.JoinTreeRequest(
             worker_id=self.worker_id,
             advertise_addr=ADVERTISE_ADDR,
@@ -272,6 +330,198 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             source_root_count=len(self.store.user_embedding_source_node_ids),
             source_node_ids=self.store.user_embedding_source_node_ids,
         )
+
+    def ensure_routing_tree(self):
+        if self.routing_tree_nodes:
+            return self.routing_tree_nodes[self.routing_tree_root_node_id]
+
+        root = RoutingTreeNode(
+            node_id=self.routing_tree_root_node_id,
+            kind="leaf",
+            depth=0,
+            custodian_worker_id=self.worker_id,
+            custodian_addr=ADVERTISE_ADDR,
+        )
+        self.routing_tree_nodes[root.node_id] = root
+        print(
+            f"[rag-worker {self.worker_id}] initialized empty routing-tree root leaf "
+            f"tree_node_id={root.node_id} custodian={root.custodian_worker_id} "
+            f"record_limit={ROUTING_TREE_RECORD_LIMIT} delta={ROUTING_TREE_DELTA}",
+            flush=True,
+        )
+        return root
+
+    def insert_routing_tree_peer(self, entry):
+        if self.worker_id != INIT_WORKER_ID:
+            return
+        if not entry.get("embedding"):
+            print(
+                f"[rag-worker {self.worker_id}] skipping routing-tree insert "
+                f"worker_id={entry.get('worker_id')} because embedding is empty",
+                flush=True,
+            )
+            return
+        if entry["worker_id"] in self.routing_tree_inserted_workers:
+            return
+
+        self.ensure_routing_tree()
+        leaf = self.find_routing_tree_leaf(entry["embedding"])
+        leaf.member_worker_ids.append(entry["worker_id"])
+        self.routing_tree_inserted_workers.add(entry["worker_id"])
+        print(
+            f"[rag-worker {self.worker_id}] inserted routing-tree peer "
+            f"worker_id={entry['worker_id']} leaf={leaf.node_id} "
+            f"leaf_size={len(leaf.member_worker_ids)}/{ROUTING_TREE_RECORD_LIMIT}",
+            flush=True,
+        )
+        if len(leaf.member_worker_ids) > ROUTING_TREE_RECORD_LIMIT:
+            self.split_routing_tree_leaf(leaf)
+        self.refresh_routing_tree_metadata()
+
+    def find_routing_tree_leaf(self, embedding) -> RoutingTreeNode:
+        node = self.routing_tree_nodes[self.routing_tree_root_node_id]
+        emb = _embedding_array(embedding)
+        while node.kind == "split":
+            left_distance = np.linalg.norm(emb - np.asarray(node.centroid_left, dtype=np.float64))
+            right_distance = np.linalg.norm(emb - np.asarray(node.centroid_right, dtype=np.float64))
+            next_node_id = node.left_child_id if left_distance <= right_distance else node.right_child_id
+            print(
+                f"[rag-worker {self.worker_id}] routing-tree traversal "
+                f"at={node.node_id} left_distance={left_distance:.4f} "
+                f"right_distance={right_distance:.4f} next={next_node_id}",
+                flush=True,
+            )
+            node = self.routing_tree_nodes[next_node_id]
+        return node
+
+    def split_routing_tree_leaf(self, leaf: RoutingTreeNode):
+        member_ids = list(dict.fromkeys(leaf.member_worker_ids))
+        embeddings = []
+        for worker_id in member_ids:
+            entry = self.joined_tree_users.get(worker_id)
+            if entry is not None and entry.get("embedding"):
+                embeddings.append(_embedding_array(entry["embedding"]))
+        if len(embeddings) < 2:
+            return
+
+        labels, centroids = _two_means(np.asarray(embeddings, dtype=np.float64))
+        left_members = [worker_id for worker_id, label in zip(member_ids, labels) if label == 0]
+        right_members = [worker_id for worker_id, label in zip(member_ids, labels) if label == 1]
+        if not left_members or not right_members:
+            print(
+                f"[rag-worker {self.worker_id}] routing-tree split skipped "
+                f"leaf={leaf.node_id} left={left_members} right={right_members}",
+                flush=True,
+            )
+            return
+
+        left_custodian = self.closest_member_to_centroid(left_members, centroids[0])
+        right_custodian = self.closest_member_to_centroid(right_members, centroids[1])
+        left_id = self.next_routing_tree_child_id(leaf.node_id, "L")
+        right_id = self.next_routing_tree_child_id(leaf.node_id, "R")
+
+        leaf.kind = "split"
+        leaf.member_worker_ids = []
+        leaf.left_child_id = left_id
+        leaf.right_child_id = right_id
+        leaf.left_custodian_worker_id = left_custodian["worker_id"]
+        leaf.left_custodian_addr = left_custodian["advertise_addr"]
+        leaf.right_custodian_worker_id = right_custodian["worker_id"]
+        leaf.right_custodian_addr = right_custodian["advertise_addr"]
+        leaf.centroid_left = centroids[0].astype(float).tolist()
+        leaf.centroid_right = centroids[1].astype(float).tolist()
+
+        self.routing_tree_nodes[left_id] = RoutingTreeNode(
+            node_id=left_id,
+            kind="leaf",
+            depth=leaf.depth + 1,
+            parent_id=leaf.node_id,
+            custodian_worker_id=left_custodian["worker_id"],
+            custodian_addr=left_custodian["advertise_addr"],
+            member_worker_ids=left_members,
+        )
+        self.routing_tree_nodes[right_id] = RoutingTreeNode(
+            node_id=right_id,
+            kind="leaf",
+            depth=leaf.depth + 1,
+            parent_id=leaf.node_id,
+            custodian_worker_id=right_custodian["worker_id"],
+            custodian_addr=right_custodian["advertise_addr"],
+            member_worker_ids=right_members,
+        )
+        print(
+            f"[rag-worker {self.worker_id}] routing-tree leaf split "
+            f"leaf={leaf.node_id} left={left_id} left_members={left_members} "
+            f"left_custodian={left_custodian['worker_id']}@{left_custodian['advertise_addr']} "
+            f"right={right_id} right_members={right_members} "
+            f"right_custodian={right_custodian['worker_id']}@{right_custodian['advertise_addr']}",
+            flush=True,
+        )
+
+    def closest_member_to_centroid(self, member_ids: list[str], centroid: np.ndarray):
+        best_entry = None
+        best_distance = None
+        for worker_id in member_ids:
+            entry = self.joined_tree_users[worker_id]
+            distance = np.linalg.norm(_embedding_array(entry["embedding"]) - centroid)
+            if best_distance is None or distance < best_distance:
+                best_entry = entry
+                best_distance = distance
+        return best_entry
+
+    def next_routing_tree_child_id(self, parent_id: str, side: str):
+        self.next_routing_tree_node_id += 1
+        return f"{parent_id}.{side}{self.next_routing_tree_node_id}"
+
+    def refresh_routing_tree_metadata(self):
+        if not self.routing_tree_nodes:
+            return
+
+        self.routing_epoch += 1
+        self.routing_tree_built_for_workers = set(self.routing_tree_inserted_workers)
+        self.closest_user_entries_by_worker = self.closest_users_from_routing_tree()
+
+        leaf_members = self.routing_tree_leaf_members()
+        print(
+            f"[rag-worker {self.worker_id}] refreshed routing-tree metadata "
+            f"epoch={self.routing_epoch} joined={len(self.joined_tree_users)} "
+            f"leaves={len(leaf_members)} "
+            f"leaf_members={json.dumps(leaf_members, sort_keys=True)}",
+            flush=True,
+        )
+
+    def routing_tree_leaf_members(self):
+        return {
+            node_id: node.member_worker_ids
+            for node_id, node in sorted(self.routing_tree_nodes.items())
+            if node.kind == "leaf"
+        }
+
+    def closest_users_from_routing_tree(self):
+        closest_by_worker = {}
+        for node in self.routing_tree_nodes.values():
+            if node.kind != "leaf":
+                continue
+            for worker_id in node.member_worker_ids:
+                owner_entry = self.joined_tree_users.get(worker_id)
+                if owner_entry is None:
+                    continue
+                scored = []
+                owner_embedding = owner_entry["embedding"]
+                for candidate_id in node.member_worker_ids:
+                    if candidate_id == worker_id:
+                        continue
+                    candidate_entry = self.joined_tree_users.get(candidate_id)
+                    if candidate_entry is None:
+                        continue
+                    score = cosine_similarity(owner_embedding, candidate_entry["embedding"])
+                    scored.append((score, candidate_entry))
+                scored.sort(key=lambda item: item[0], reverse=True)
+                closest_by_worker[worker_id] = [
+                    entry
+                    for _, entry in scored[:ROUTING_TREE_CLOSEST_USERS]
+                ]
+        return closest_by_worker
 
     def user_embedding_record_from_entry(self, entry):
         return rag_pb2.UserEmbeddingRecord(
@@ -283,98 +533,6 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             source_root_count=entry.get("source_root_count", 0),
             source_node_ids=entry.get("source_node_ids", []),
         )
-
-    def maybe_build_routing_tree(self):
-        if self.worker_id != INIT_WORKER_ID:
-            return
-        registered_count = len(self.user_embedding_registry)
-        if registered_count < ROUTING_TREE_EXPECTED_USERS:
-            print(
-                f"[rag-worker {self.worker_id}] waiting to build routing tree "
-                f"registered={registered_count}/{ROUTING_TREE_EXPECTED_USERS}",
-                flush=True,
-            )
-            return
-
-        usable_entries = [
-            entry
-            for entry in self.user_embedding_registry.values()
-            if entry.get("embedding")
-        ]
-        worker_ids = {entry["worker_id"] for entry in usable_entries}
-        if not usable_entries:
-            print(
-                f"[rag-worker {self.worker_id}] cannot build routing tree; "
-                "no registered users have embeddings",
-                flush=True,
-            )
-            return
-        if worker_ids == self.routing_tree_built_for_workers:
-            return
-
-        try:
-            from Semantica.tree.script import construct_rag_routing_tree
-
-            records = [
-                {
-                    "worker_id": entry["worker_id"],
-                    "addr": entry["advertise_addr"],
-                    "embedding": entry["embedding"],
-                }
-                for entry in usable_entries
-            ]
-            result = construct_rag_routing_tree(
-                records,
-                record_limit_per_leafnode=ROUTING_TREE_RECORD_LIMIT,
-                delta=ROUTING_TREE_DELTA,
-                closest_user_count=ROUTING_TREE_CLOSEST_USERS,
-                candidate_user_count=(
-                    ROUTING_TREE_CANDIDATE_USERS
-                    if ROUTING_TREE_CANDIDATE_USERS > 0
-                    else None
-                ),
-            )
-        except Exception as exc:
-            print(
-                f"[rag-worker {self.worker_id}] failed to build routing tree: {exc}",
-                flush=True,
-            )
-            return
-
-        self.routing_epoch += 1
-        self.routing_tree_result = result
-        self.routing_tree_built_for_workers = worker_ids
-        self.closest_user_entries_by_worker = {}
-        closest_users = result["closest_users"]
-        for owner_worker_id, closest_records in closest_users.items():
-            entries = []
-            for closest in closest_records:
-                closest_worker_id = closest["worker_id"]
-                entry = self.user_embedding_registry.get(closest_worker_id)
-                if entry is not None:
-                    entries.append(entry)
-            self.closest_user_entries_by_worker[owner_worker_id] = entries
-
-        print(
-            f"[rag-worker {self.worker_id}] built Semantica routing tree "
-            f"epoch={self.routing_epoch} users={len(worker_ids)} "
-            f"leaves={len(result['leaf_members'])} "
-            f"record_limit={ROUTING_TREE_RECORD_LIMIT} "
-            f"closest_k={ROUTING_TREE_CLOSEST_USERS}",
-            flush=True,
-        )
-        print(
-            f"[rag-worker {self.worker_id}] routing tree leaf_members="
-            f"{json.dumps(result['leaf_members'], sort_keys=True)}",
-            flush=True,
-        )
-        for owner_worker_id, entries in sorted(self.closest_user_entries_by_worker.items()):
-            print(
-                f"[rag-worker {self.worker_id}] routing closest-users "
-                f"epoch={self.routing_epoch} worker_id={owner_worker_id} "
-                f"closest={[entry['worker_id'] for entry in entries]}",
-                flush=True,
-            )
 
     async def SendEvidence(self, request, context):
         evidence = self.evidence_by_query.setdefault(request.query_id, [])
@@ -551,11 +709,8 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         await self.send_chain_query_to_target(target, next_request)
 
     async def choose_chain_hop_target(self, query: str, visited_worker_ids: set[str]):
-        if ROUTING_MODE == RoutingMode.BATCH_REGISTRY and self.worker_id != INIT_WORKER_ID:
-            await self.sync_user_embedding_registry_once()
         if (
-            ROUTING_MODE == RoutingMode.JOIN_TREE
-            and self.worker_id != INIT_WORKER_ID
+            self.worker_id != INIT_WORKER_ID
             and self.worker_id not in self.closest_user_entries_by_worker
             and len(self.user_embedding_registry) <= 1
         ):
@@ -1100,10 +1255,8 @@ async def serve():
 
     servicer = RagWorkerServicer(WORKER_ID, store, NEIGHBORS, bert_embedder)
     servicer.record_user_embedding(servicer.build_user_embedding_registration())
-    if ROUTING_MODE == RoutingMode.BATCH_REGISTRY:
-        servicer.maybe_build_routing_tree()
-    elif ROUTING_MODE == RoutingMode.JOIN_TREE and WORKER_ID == INIT_WORKER_ID:
-        servicer.record_join_tree_user(servicer.build_join_tree_request())
+    if WORKER_ID == INIT_WORKER_ID:
+        servicer.record_routing_tree_join(servicer.build_routing_tree_join_request())
 
     server = grpc.aio.server()
     rag_pb2_grpc.add_RagServiceServicer_to_server(
@@ -1132,37 +1285,23 @@ async def serve():
 
 
 def start_routing_startup_tasks(servicer: RagWorkerServicer):
-    if ROUTING_MODE == RoutingMode.BATCH_REGISTRY:
-        asyncio.create_task(register_user_embedding_with_init(servicer))
-        asyncio.create_task(sync_user_embedding_registry_from_init(servicer))
-        return
-
-    if ROUTING_MODE == RoutingMode.JOIN_TREE:
-        print(
-            f"[rag-worker {WORKER_ID}] join_tree routing mode selected; "
-            "batch RegisterUserEmbedding/sync startup is disabled",
-            flush=True,
-        )
-        asyncio.create_task(join_semantica_tree(servicer))
-        return
-
     print(
-        f"[rag-worker {WORKER_ID}] unknown RAG_ROUTING_MODE={ROUTING_MODE.value!r}; "
-        "no routing startup tasks were started",
+        f"[rag-worker {WORKER_ID}] routing-tree startup selected",
         flush=True,
     )
+    asyncio.create_task(join_routing_tree(servicer))
 
 
-async def join_semantica_tree(servicer: RagWorkerServicer):
+async def join_routing_tree(servicer: RagWorkerServicer):
     if WORKER_ID == INIT_WORKER_ID:
         print(
-            f"[rag-worker {WORKER_ID}] root custodian ready for JoinTree "
+            f"[rag-worker {WORKER_ID}] root custodian ready for routing tree "
             f"joined={len(servicer.joined_tree_users)}/{ROUTING_TREE_EXPECTED_USERS}",
             flush=True,
         )
         return
 
-    request = servicer.build_join_tree_request()
+    request = servicer.build_routing_tree_join_request()
     for attempt in range(1, USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS + 1):
         try:
             async with grpc.aio.insecure_channel(INIT_ADDR) as channel:
@@ -1175,25 +1314,25 @@ async def join_semantica_tree(servicer: RagWorkerServicer):
             for record in reply.closest_users:
                 servicer.record_user_embedding_record(record)
             print(
-                f"[rag-worker {WORKER_ID}] joined Semantica tree "
+                f"[rag-worker {WORKER_ID}] joined routing tree "
                 f"root={reply.root_worker_id} addr={INIT_ADDR} "
                 f"joined={reply.joined_count}/{reply.expected_count} "
                 f"routing_epoch={reply.routing_epoch} "
                 f"closest_users={len(reply.closest_users)} attempt={attempt}",
                 flush=True,
             )
-            asyncio.create_task(sync_join_tree_closest_users(servicer))
+            asyncio.create_task(sync_routing_tree_closest_users(servicer))
             return
         except Exception as exc:
             if attempt == USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS:
                 print(
-                    f"[rag-worker {WORKER_ID}] failed to join Semantica tree "
+                    f"[rag-worker {WORKER_ID}] failed to join routing tree "
                     f"root_addr={INIT_ADDR} attempts={attempt}: {exc}",
                     flush=True,
                 )
                 return
             print(
-                f"[rag-worker {WORKER_ID}] retrying JoinTree "
+                f"[rag-worker {WORKER_ID}] retrying routing-tree join "
                 f"root_addr={INIT_ADDR} attempt={attempt}/"
                 f"{USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS}: {exc}",
                 flush=True,
@@ -1201,7 +1340,7 @@ async def join_semantica_tree(servicer: RagWorkerServicer):
             await asyncio.sleep(USER_EMBEDDING_REGISTER_RETRY_SECONDS)
 
 
-async def sync_join_tree_closest_users(servicer: RagWorkerServicer):
+async def sync_routing_tree_closest_users(servicer: RagWorkerServicer):
     if WORKER_ID == INIT_WORKER_ID:
         return
 
@@ -1209,78 +1348,23 @@ async def sync_join_tree_closest_users(servicer: RagWorkerServicer):
         ok = await servicer.sync_user_embedding_registry_once()
         if ok and len(servicer.user_embedding_registry) > 1:
             print(
-                f"[rag-worker {WORKER_ID}] synced JoinTree closest-users "
+                f"[rag-worker {WORKER_ID}] synced routing-tree closest-users "
                 f"count={len(servicer.user_embedding_registry) - 1} attempt={attempt}",
                 flush=True,
             )
             return
         if attempt == USER_EMBEDDING_SYNC_RETRY_ATTEMPTS:
             print(
-                f"[rag-worker {WORKER_ID}] JoinTree closest-users sync timed out "
+                f"[rag-worker {WORKER_ID}] routing-tree closest-users sync timed out "
                 f"root_addr={INIT_ADDR} attempts={attempt}",
                 flush=True,
             )
             return
         await asyncio.sleep(USER_EMBEDDING_SYNC_RETRY_SECONDS)
-
-async def register_user_embedding_with_init(servicer: RagWorkerServicer):
-    if WORKER_ID == INIT_WORKER_ID:
-        return
-
-    request = servicer.build_user_embedding_registration()
-    for attempt in range(1, USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS + 1):
-        try:
-            async with grpc.aio.insecure_channel(INIT_ADDR) as channel:
-                stub = rag_pb2_grpc.RagServiceStub(channel)
-                reply = await stub.RegisterUserEmbedding(request, timeout=5.0)
-            print(
-                f"[rag-worker {WORKER_ID}] registered user embedding with init "
-                f"addr={INIT_ADDR} init_worker={reply.worker_id} "
-                f"registered_count={reply.registered_count} attempt={attempt}",
-                flush=True,
-            )
-            return
-        except Exception as exc:
-            if attempt == USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS:
-                print(
-                    f"[rag-worker {WORKER_ID}] failed to register user embedding "
-                    f"with init addr={INIT_ADDR} attempts={attempt}: {exc}",
-                    flush=True,
-                )
-                return
-            print(
-                f"[rag-worker {WORKER_ID}] retrying user embedding registration "
-                f"addr={INIT_ADDR} attempt={attempt}/"
-                f"{USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS}: {exc}",
-                flush=True,
-            )
-            await asyncio.sleep(USER_EMBEDDING_REGISTER_RETRY_SECONDS)
-
-
-async def sync_user_embedding_registry_from_init(servicer: RagWorkerServicer):
-    if WORKER_ID == INIT_WORKER_ID:
-        return
-
-    for attempt in range(1, USER_EMBEDDING_SYNC_RETRY_ATTEMPTS + 1):
-        ok = await servicer.sync_user_embedding_registry_once()
-        if ok:
-            return
-        if attempt == USER_EMBEDDING_SYNC_RETRY_ATTEMPTS:
-            print(
-                f"[rag-worker {WORKER_ID}] failed to sync user embedding registry "
-                f"from init addr={INIT_ADDR} attempts={attempt}",
-                flush=True,
-            )
-            return
-        await asyncio.sleep(USER_EMBEDDING_SYNC_RETRY_SECONDS)
-
-
 async def inject_bootstrap_query(servicer: RagWorkerServicer):
     await asyncio.sleep(BOOTSTRAP_DELAY_SECONDS)
-    if BOOTSTRAP_WAIT_FOR_ROUTING_TREE and ROUTING_MODE == RoutingMode.BATCH_REGISTRY:
+    if BOOTSTRAP_WAIT_FOR_ROUTING_TREE:
         await wait_for_bootstrap_routing_tree(servicer)
-    elif BOOTSTRAP_WAIT_FOR_ROUTING_TREE and ROUTING_MODE == RoutingMode.JOIN_TREE:
-        await wait_for_bootstrap_join_tree(servicer)
     query_id = BOOTSTRAP_QUERY_ID or str(uuid.uuid4())
     request = rag_pb2.RouteQueryRequest(
         query_id=query_id,
@@ -1297,40 +1381,7 @@ async def inject_bootstrap_query(servicer: RagWorkerServicer):
     )
     await servicer.RouteQuery(request, context=None)
 
-
 async def wait_for_bootstrap_routing_tree(servicer: RagWorkerServicer):
-    if WORKER_ID != INIT_WORKER_ID:
-        return
-
-    deadline = asyncio.get_running_loop().time() + BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS
-    while servicer.routing_epoch == 0:
-        servicer.maybe_build_routing_tree()
-        if servicer.routing_epoch > 0:
-            break
-        if asyncio.get_running_loop().time() >= deadline:
-            print(
-                f"[rag-worker {WORKER_ID}] bootstrap routing-tree wait timed out "
-                f"registered={len(servicer.user_embedding_registry)}/"
-                f"{ROUTING_TREE_EXPECTED_USERS}; injecting query anyway",
-                flush=True,
-            )
-            return
-        print(
-            f"[rag-worker {WORKER_ID}] waiting for routing tree before bootstrap "
-            f"registered={len(servicer.user_embedding_registry)}/"
-            f"{ROUTING_TREE_EXPECTED_USERS}",
-            flush=True,
-        )
-        await asyncio.sleep(2.0)
-
-    print(
-        f"[rag-worker {WORKER_ID}] routing tree ready for bootstrap "
-        f"epoch={servicer.routing_epoch}",
-        flush=True,
-    )
-
-
-async def wait_for_bootstrap_join_tree(servicer: RagWorkerServicer):
     if WORKER_ID != INIT_WORKER_ID:
         return
 
@@ -1339,7 +1390,8 @@ async def wait_for_bootstrap_join_tree(servicer: RagWorkerServicer):
         len(servicer.joined_tree_users) < ROUTING_TREE_EXPECTED_USERS
         or servicer.routing_epoch == 0
     ):
-        servicer.maybe_build_routing_tree()
+        if servicer.routing_epoch == 0:
+            servicer.refresh_routing_tree_metadata()
         if (
             len(servicer.joined_tree_users) >= ROUTING_TREE_EXPECTED_USERS
             and servicer.routing_epoch > 0
@@ -1347,7 +1399,7 @@ async def wait_for_bootstrap_join_tree(servicer: RagWorkerServicer):
             break
         if asyncio.get_running_loop().time() >= deadline:
             print(
-                f"[rag-worker {WORKER_ID}] bootstrap JoinTree wait timed out "
+                f"[rag-worker {WORKER_ID}] bootstrap routing-tree wait timed out "
                 f"joined={len(servicer.joined_tree_users)}/"
                 f"{ROUTING_TREE_EXPECTED_USERS} routing_epoch={servicer.routing_epoch}; "
                 "injecting query anyway",
@@ -1355,7 +1407,7 @@ async def wait_for_bootstrap_join_tree(servicer: RagWorkerServicer):
             )
             return
         print(
-            f"[rag-worker {WORKER_ID}] waiting for JoinTree before bootstrap "
+            f"[rag-worker {WORKER_ID}] waiting for routing tree before bootstrap "
             f"joined={len(servicer.joined_tree_users)}/"
             f"{ROUTING_TREE_EXPECTED_USERS} routing_epoch={servicer.routing_epoch}",
             flush=True,
@@ -1363,7 +1415,7 @@ async def wait_for_bootstrap_join_tree(servicer: RagWorkerServicer):
         await asyncio.sleep(2.0)
 
     print(
-        f"[rag-worker {WORKER_ID}] JoinTree ready for bootstrap "
+        f"[rag-worker {WORKER_ID}] routing tree ready for bootstrap "
         f"joined={len(servicer.joined_tree_users)}/"
         f"{ROUTING_TREE_EXPECTED_USERS} routing_epoch={servicer.routing_epoch}",
         flush=True,
