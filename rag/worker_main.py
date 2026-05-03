@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import uuid
+from enum import Enum
 
 import grpc
 from grpc_reflection.v1alpha import reflection
@@ -10,6 +11,20 @@ from rag import rag_pb2, rag_pb2_grpc
 from rag.bert_embedder import BertEmbedder, DEFAULT_BERT_MODEL, cosine_similarity
 from rag.document_store import LocalDocumentStore
 from rag.llm_client import build_inference_client_from_env
+
+
+class RoutingMode(str, Enum):
+    BATCH_REGISTRY = "batch_registry"
+    JOIN_TREE = "join_tree"
+
+    @classmethod
+    def from_env(cls, value: str):
+        normalized = value.strip().lower()
+        for mode in cls:
+            if mode.value == normalized:
+                return mode
+        valid_modes = ", ".join(mode.value for mode in cls)
+        raise ValueError(f"Invalid RAG_ROUTING_MODE={value!r}; expected one of: {valid_modes}")
 
 
 WORKER_ID = os.getenv("RAG_WORKER_ID", os.getenv("HOSTNAME", "rag-worker"))
@@ -49,7 +64,7 @@ ROUTING_TREE_RECORD_LIMIT = int(os.getenv("RAG_ROUTING_TREE_RECORD_LIMIT", "50")
 ROUTING_TREE_DELTA = float(os.getenv("RAG_ROUTING_TREE_DELTA", "0.0005"))
 ROUTING_TREE_CLOSEST_USERS = int(os.getenv("RAG_ROUTING_TREE_CLOSEST_USERS", "2"))
 ROUTING_TREE_CANDIDATE_USERS = int(os.getenv("RAG_ROUTING_TREE_CANDIDATE_USERS", "0"))
-ROUTING_MODE = os.getenv("RAG_ROUTING_MODE", "batch_registry").strip().lower()
+ROUTING_MODE = RoutingMode.from_env(os.getenv("RAG_ROUTING_MODE", RoutingMode.JOIN_TREE.value))
 INIT_WORKER_ID = os.getenv("RAG_INIT_WORKER_ID", "node1")
 INIT_ADDR = os.getenv("RAG_INIT_ADDR", "node1:9100")
 USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS = int(
@@ -163,7 +178,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             )
             return closest_entries
 
-        if ROUTING_MODE == "join_tree" and self.routing_epoch == 0:
+        if ROUTING_MODE == RoutingMode.JOIN_TREE and self.routing_epoch == 0:
             print(
                 f"[rag-worker {self.worker_id}] routing closest-users not ready "
                 f"requester={requester_worker_id} "
@@ -536,10 +551,10 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         await self.send_chain_query_to_target(target, next_request)
 
     async def choose_chain_hop_target(self, query: str, visited_worker_ids: set[str]):
-        if ROUTING_MODE == "batch_registry" and self.worker_id != INIT_WORKER_ID:
+        if ROUTING_MODE == RoutingMode.BATCH_REGISTRY and self.worker_id != INIT_WORKER_ID:
             await self.sync_user_embedding_registry_once()
         if (
-            ROUTING_MODE == "join_tree"
+            ROUTING_MODE == RoutingMode.JOIN_TREE
             and self.worker_id != INIT_WORKER_ID
             and self.worker_id not in self.closest_user_entries_by_worker
             and len(self.user_embedding_registry) <= 1
@@ -1085,9 +1100,9 @@ async def serve():
 
     servicer = RagWorkerServicer(WORKER_ID, store, NEIGHBORS, bert_embedder)
     servicer.record_user_embedding(servicer.build_user_embedding_registration())
-    if ROUTING_MODE == "batch_registry":
+    if ROUTING_MODE == RoutingMode.BATCH_REGISTRY:
         servicer.maybe_build_routing_tree()
-    elif ROUTING_MODE == "join_tree" and WORKER_ID == INIT_WORKER_ID:
+    elif ROUTING_MODE == RoutingMode.JOIN_TREE and WORKER_ID == INIT_WORKER_ID:
         servicer.record_join_tree_user(servicer.build_join_tree_request())
 
     server = grpc.aio.server()
@@ -1106,7 +1121,7 @@ async def serve():
     server.add_insecure_port(listen_addr)
     print(
         f"[rag-worker {WORKER_ID}] listening on {listen_addr} "
-        f"routing_mode={ROUTING_MODE} neighbors={NEIGHBORS}",
+        f"routing_mode={ROUTING_MODE.value} neighbors={NEIGHBORS}",
         flush=True,
     )
     await server.start()
@@ -1117,12 +1132,12 @@ async def serve():
 
 
 def start_routing_startup_tasks(servicer: RagWorkerServicer):
-    if ROUTING_MODE == "batch_registry":
+    if ROUTING_MODE == RoutingMode.BATCH_REGISTRY:
         asyncio.create_task(register_user_embedding_with_init(servicer))
         asyncio.create_task(sync_user_embedding_registry_from_init(servicer))
         return
 
-    if ROUTING_MODE == "join_tree":
+    if ROUTING_MODE == RoutingMode.JOIN_TREE:
         print(
             f"[rag-worker {WORKER_ID}] join_tree routing mode selected; "
             "batch RegisterUserEmbedding/sync startup is disabled",
@@ -1132,7 +1147,7 @@ def start_routing_startup_tasks(servicer: RagWorkerServicer):
         return
 
     print(
-        f"[rag-worker {WORKER_ID}] unknown RAG_ROUTING_MODE={ROUTING_MODE!r}; "
+        f"[rag-worker {WORKER_ID}] unknown RAG_ROUTING_MODE={ROUTING_MODE.value!r}; "
         "no routing startup tasks were started",
         flush=True,
     )
@@ -1262,9 +1277,9 @@ async def sync_user_embedding_registry_from_init(servicer: RagWorkerServicer):
 
 async def inject_bootstrap_query(servicer: RagWorkerServicer):
     await asyncio.sleep(BOOTSTRAP_DELAY_SECONDS)
-    if BOOTSTRAP_WAIT_FOR_ROUTING_TREE and ROUTING_MODE == "batch_registry":
+    if BOOTSTRAP_WAIT_FOR_ROUTING_TREE and ROUTING_MODE == RoutingMode.BATCH_REGISTRY:
         await wait_for_bootstrap_routing_tree(servicer)
-    elif BOOTSTRAP_WAIT_FOR_ROUTING_TREE and ROUTING_MODE == "join_tree":
+    elif BOOTSTRAP_WAIT_FOR_ROUTING_TREE and ROUTING_MODE == RoutingMode.JOIN_TREE:
         await wait_for_bootstrap_join_tree(servicer)
     query_id = BOOTSTRAP_QUERY_ID or str(uuid.uuid4())
     request = rag_pb2.RouteQueryRequest(
