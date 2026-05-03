@@ -49,6 +49,7 @@ ROUTING_TREE_RECORD_LIMIT = int(os.getenv("RAG_ROUTING_TREE_RECORD_LIMIT", "50")
 ROUTING_TREE_DELTA = float(os.getenv("RAG_ROUTING_TREE_DELTA", "0.0005"))
 ROUTING_TREE_CLOSEST_USERS = int(os.getenv("RAG_ROUTING_TREE_CLOSEST_USERS", "2"))
 ROUTING_TREE_CANDIDATE_USERS = int(os.getenv("RAG_ROUTING_TREE_CANDIDATE_USERS", "0"))
+ROUTING_MODE = os.getenv("RAG_ROUTING_MODE", "batch_registry").strip().lower()
 INIT_WORKER_ID = os.getenv("RAG_INIT_WORKER_ID", "node1")
 INIT_ADDR = os.getenv("RAG_INIT_ADDR", "node1:9100")
 USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS = int(
@@ -99,9 +100,39 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         self.routing_tree_result = None
         self.routing_tree_built_for_workers = set()
         self.closest_user_entries_by_worker = {}
+        self.joined_tree_users = {}
 
     async def Ping(self, request, context):
         return rag_pb2.RagPingReply(worker_id=self.worker_id, status="alive")
+
+    async def JoinTree(self, request, context):
+        if self.worker_id != INIT_WORKER_ID:
+            print(
+                f"[rag-worker {self.worker_id}] rejected JoinTree "
+                f"from={request.worker_id}; root_worker={INIT_WORKER_ID}",
+                flush=True,
+            )
+            return rag_pb2.JoinTreeReply(
+                root_worker_id=INIT_WORKER_ID,
+                accepted=False,
+                joined_count=0,
+                expected_count=ROUTING_TREE_EXPECTED_USERS,
+                routing_epoch=self.routing_epoch,
+            )
+
+        self.record_join_tree_user(request)
+        closest_entries = self.closest_user_entries_by_worker.get(request.worker_id, [])
+        return rag_pb2.JoinTreeReply(
+            root_worker_id=self.worker_id,
+            accepted=True,
+            joined_count=len(self.joined_tree_users),
+            expected_count=ROUTING_TREE_EXPECTED_USERS,
+            routing_epoch=self.routing_epoch,
+            closest_users=[
+                self.user_embedding_record_from_entry(entry)
+                for entry in closest_entries
+            ],
+        )
 
     async def RegisterUserEmbedding(self, request, context):
         self.record_user_embedding(request)
@@ -132,6 +163,15 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             )
             return closest_entries
 
+        if ROUTING_MODE == "join_tree" and self.routing_epoch == 0:
+            print(
+                f"[rag-worker {self.worker_id}] routing closest-users not ready "
+                f"requester={requester_worker_id} "
+                f"joined={len(self.joined_tree_users)}/{ROUTING_TREE_EXPECTED_USERS}",
+                flush=True,
+            )
+            return []
+
         print(
             f"[rag-worker {self.worker_id}] serving full user embedding registry "
             f"requester={requester_worker_id} count={len(self.user_embedding_registry)} "
@@ -160,6 +200,19 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             flush=True,
         )
 
+    def record_join_tree_user(self, request):
+        entry = self.user_embedding_entry_from_registration(request)
+        self.joined_tree_users[request.worker_id] = entry
+        self.user_embedding_registry[request.worker_id] = entry
+        print(
+            f"[rag-worker {self.worker_id}] JoinTree accepted "
+            f"worker_id={request.worker_id} addr={request.advertise_addr} "
+            f"dimension={entry['embedding_dimension']} "
+            f"joined={len(self.joined_tree_users)}/{ROUTING_TREE_EXPECTED_USERS}",
+            flush=True,
+        )
+        self.maybe_build_routing_tree()
+
     def record_user_embedding_record(self, record):
         self.user_embedding_registry[record.worker_id] = {
             "worker_id": record.worker_id,
@@ -185,6 +238,17 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
 
     def build_user_embedding_registration(self):
         return rag_pb2.RegisterUserEmbeddingRequest(
+            worker_id=self.worker_id,
+            advertise_addr=ADVERTISE_ADDR,
+            embedding=self.store.user_embedding or [],
+            embedding_model=self.store.user_embedding_model or "",
+            embedding_dimension=self.store.user_embedding_dimension,
+            source_root_count=len(self.store.user_embedding_source_node_ids),
+            source_node_ids=self.store.user_embedding_source_node_ids,
+        )
+
+    def build_join_tree_request(self):
+        return rag_pb2.JoinTreeRequest(
             worker_id=self.worker_id,
             advertise_addr=ADVERTISE_ADDR,
             embedding=self.store.user_embedding or [],
@@ -472,7 +536,14 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         await self.send_chain_query_to_target(target, next_request)
 
     async def choose_chain_hop_target(self, query: str, visited_worker_ids: set[str]):
-        if self.worker_id != INIT_WORKER_ID:
+        if ROUTING_MODE == "batch_registry" and self.worker_id != INIT_WORKER_ID:
+            await self.sync_user_embedding_registry_once()
+        if (
+            ROUTING_MODE == "join_tree"
+            and self.worker_id != INIT_WORKER_ID
+            and self.worker_id not in self.closest_user_entries_by_worker
+            and len(self.user_embedding_registry) <= 1
+        ):
             await self.sync_user_embedding_registry_once()
 
         query_embedding = self.bert_embedder.embed_text(
@@ -1014,7 +1085,10 @@ async def serve():
 
     servicer = RagWorkerServicer(WORKER_ID, store, NEIGHBORS, bert_embedder)
     servicer.record_user_embedding(servicer.build_user_embedding_registration())
-    servicer.maybe_build_routing_tree()
+    if ROUTING_MODE == "batch_registry":
+        servicer.maybe_build_routing_tree()
+    elif ROUTING_MODE == "join_tree" and WORKER_ID == INIT_WORKER_ID:
+        servicer.record_join_tree_user(servicer.build_join_tree_request())
 
     server = grpc.aio.server()
     rag_pb2_grpc.add_RagServiceServicer_to_server(
@@ -1031,16 +1105,108 @@ async def serve():
     listen_addr = f"{HOST}:{PORT}"
     server.add_insecure_port(listen_addr)
     print(
-        f"[rag-worker {WORKER_ID}] listening on {listen_addr} neighbors={NEIGHBORS}",
+        f"[rag-worker {WORKER_ID}] listening on {listen_addr} "
+        f"routing_mode={ROUTING_MODE} neighbors={NEIGHBORS}",
         flush=True,
     )
     await server.start()
-    asyncio.create_task(register_user_embedding_with_init(servicer))
-    asyncio.create_task(sync_user_embedding_registry_from_init(servicer))
+    start_routing_startup_tasks(servicer)
     if BOOTSTRAP_QUERY and (BOOTSTRAP_DELAY_SECONDS > 0.0):
         asyncio.create_task(inject_bootstrap_query(servicer))
     await server.wait_for_termination()
 
+
+def start_routing_startup_tasks(servicer: RagWorkerServicer):
+    if ROUTING_MODE == "batch_registry":
+        asyncio.create_task(register_user_embedding_with_init(servicer))
+        asyncio.create_task(sync_user_embedding_registry_from_init(servicer))
+        return
+
+    if ROUTING_MODE == "join_tree":
+        print(
+            f"[rag-worker {WORKER_ID}] join_tree routing mode selected; "
+            "batch RegisterUserEmbedding/sync startup is disabled",
+            flush=True,
+        )
+        asyncio.create_task(join_semantica_tree(servicer))
+        return
+
+    print(
+        f"[rag-worker {WORKER_ID}] unknown RAG_ROUTING_MODE={ROUTING_MODE!r}; "
+        "no routing startup tasks were started",
+        flush=True,
+    )
+
+
+async def join_semantica_tree(servicer: RagWorkerServicer):
+    if WORKER_ID == INIT_WORKER_ID:
+        print(
+            f"[rag-worker {WORKER_ID}] root custodian ready for JoinTree "
+            f"joined={len(servicer.joined_tree_users)}/{ROUTING_TREE_EXPECTED_USERS}",
+            flush=True,
+        )
+        return
+
+    request = servicer.build_join_tree_request()
+    for attempt in range(1, USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS + 1):
+        try:
+            async with grpc.aio.insecure_channel(INIT_ADDR) as channel:
+                stub = rag_pb2_grpc.RagServiceStub(channel)
+                reply = await stub.JoinTree(request, timeout=5.0)
+            if not reply.accepted:
+                raise RuntimeError(
+                    f"root {reply.root_worker_id} rejected JoinTree request"
+                )
+            for record in reply.closest_users:
+                servicer.record_user_embedding_record(record)
+            print(
+                f"[rag-worker {WORKER_ID}] joined Semantica tree "
+                f"root={reply.root_worker_id} addr={INIT_ADDR} "
+                f"joined={reply.joined_count}/{reply.expected_count} "
+                f"routing_epoch={reply.routing_epoch} "
+                f"closest_users={len(reply.closest_users)} attempt={attempt}",
+                flush=True,
+            )
+            asyncio.create_task(sync_join_tree_closest_users(servicer))
+            return
+        except Exception as exc:
+            if attempt == USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS:
+                print(
+                    f"[rag-worker {WORKER_ID}] failed to join Semantica tree "
+                    f"root_addr={INIT_ADDR} attempts={attempt}: {exc}",
+                    flush=True,
+                )
+                return
+            print(
+                f"[rag-worker {WORKER_ID}] retrying JoinTree "
+                f"root_addr={INIT_ADDR} attempt={attempt}/"
+                f"{USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS}: {exc}",
+                flush=True,
+            )
+            await asyncio.sleep(USER_EMBEDDING_REGISTER_RETRY_SECONDS)
+
+
+async def sync_join_tree_closest_users(servicer: RagWorkerServicer):
+    if WORKER_ID == INIT_WORKER_ID:
+        return
+
+    for attempt in range(1, USER_EMBEDDING_SYNC_RETRY_ATTEMPTS + 1):
+        ok = await servicer.sync_user_embedding_registry_once()
+        if ok and len(servicer.user_embedding_registry) > 1:
+            print(
+                f"[rag-worker {WORKER_ID}] synced JoinTree closest-users "
+                f"count={len(servicer.user_embedding_registry) - 1} attempt={attempt}",
+                flush=True,
+            )
+            return
+        if attempt == USER_EMBEDDING_SYNC_RETRY_ATTEMPTS:
+            print(
+                f"[rag-worker {WORKER_ID}] JoinTree closest-users sync timed out "
+                f"root_addr={INIT_ADDR} attempts={attempt}",
+                flush=True,
+            )
+            return
+        await asyncio.sleep(USER_EMBEDDING_SYNC_RETRY_SECONDS)
 
 async def register_user_embedding_with_init(servicer: RagWorkerServicer):
     if WORKER_ID == INIT_WORKER_ID:
@@ -1096,8 +1262,10 @@ async def sync_user_embedding_registry_from_init(servicer: RagWorkerServicer):
 
 async def inject_bootstrap_query(servicer: RagWorkerServicer):
     await asyncio.sleep(BOOTSTRAP_DELAY_SECONDS)
-    if BOOTSTRAP_WAIT_FOR_ROUTING_TREE:
+    if BOOTSTRAP_WAIT_FOR_ROUTING_TREE and ROUTING_MODE == "batch_registry":
         await wait_for_bootstrap_routing_tree(servicer)
+    elif BOOTSTRAP_WAIT_FOR_ROUTING_TREE and ROUTING_MODE == "join_tree":
+        await wait_for_bootstrap_join_tree(servicer)
     query_id = BOOTSTRAP_QUERY_ID or str(uuid.uuid4())
     request = rag_pb2.RouteQueryRequest(
         query_id=query_id,
@@ -1143,6 +1311,46 @@ async def wait_for_bootstrap_routing_tree(servicer: RagWorkerServicer):
     print(
         f"[rag-worker {WORKER_ID}] routing tree ready for bootstrap "
         f"epoch={servicer.routing_epoch}",
+        flush=True,
+    )
+
+
+async def wait_for_bootstrap_join_tree(servicer: RagWorkerServicer):
+    if WORKER_ID != INIT_WORKER_ID:
+        return
+
+    deadline = asyncio.get_running_loop().time() + BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS
+    while (
+        len(servicer.joined_tree_users) < ROUTING_TREE_EXPECTED_USERS
+        or servicer.routing_epoch == 0
+    ):
+        servicer.maybe_build_routing_tree()
+        if (
+            len(servicer.joined_tree_users) >= ROUTING_TREE_EXPECTED_USERS
+            and servicer.routing_epoch > 0
+        ):
+            break
+        if asyncio.get_running_loop().time() >= deadline:
+            print(
+                f"[rag-worker {WORKER_ID}] bootstrap JoinTree wait timed out "
+                f"joined={len(servicer.joined_tree_users)}/"
+                f"{ROUTING_TREE_EXPECTED_USERS} routing_epoch={servicer.routing_epoch}; "
+                "injecting query anyway",
+                flush=True,
+            )
+            return
+        print(
+            f"[rag-worker {WORKER_ID}] waiting for JoinTree before bootstrap "
+            f"joined={len(servicer.joined_tree_users)}/"
+            f"{ROUTING_TREE_EXPECTED_USERS} routing_epoch={servicer.routing_epoch}",
+            flush=True,
+        )
+        await asyncio.sleep(2.0)
+
+    print(
+        f"[rag-worker {WORKER_ID}] JoinTree ready for bootstrap "
+        f"joined={len(servicer.joined_tree_users)}/"
+        f"{ROUTING_TREE_EXPECTED_USERS} routing_epoch={servicer.routing_epoch}",
         flush=True,
     )
 
