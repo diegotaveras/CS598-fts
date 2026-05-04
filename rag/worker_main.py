@@ -12,6 +12,7 @@ from grpc_reflection.v1alpha import reflection
 from rag import rag_pb2, rag_pb2_grpc
 from rag.bert_embedder import BertEmbedder, DEFAULT_BERT_MODEL, cosine_similarity
 from rag.document_store import LocalDocumentStore
+from rag.leader_election import LeaderElection
 from rag.llm_client import build_inference_client_from_env
 
 
@@ -155,6 +156,12 @@ BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS = float(
 )
 MULTICAST_RETRY_ATTEMPTS = int(os.getenv("RAG_MULTICAST_RETRY_ATTEMPTS", "6"))
 MULTICAST_RETRY_SECONDS = float(os.getenv("RAG_MULTICAST_RETRY_SECONDS", "5.0"))
+LEASE_DURATION_SECONDS = int(os.getenv("RAG_LEASE_DURATION_SECONDS", "30"))
+# Set RAG_FORCE_LEADER_ID to skip DynamoDB election and statically assign a leader.
+# e.g. RAG_FORCE_LEADER_ID=node1  → node1 is always root; remove var to use DynamoDB election.
+FORCE_LEADER_ID: str | None = os.getenv("RAG_FORCE_LEADER_ID")
+
+leader_election: LeaderElection | None = None
 
 
 class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
@@ -1561,11 +1568,6 @@ async def serve():
 
     servicer = RagWorkerServicer(WORKER_ID, store, NEIGHBORS, bert_embedder)
     servicer.record_user_embedding(servicer.build_user_embedding_registration())
-    if WORKER_ID == INIT_WORKER_ID:
-        await servicer.handle_routing_tree_join(
-            servicer.build_routing_tree_join_request(),
-            servicer.routing_tree_root_node_id,
-        )
 
     server = grpc.aio.server()
     rag_pb2_grpc.add_RagServiceServicer_to_server(
@@ -1587,22 +1589,54 @@ async def serve():
         flush=True,
     )
     await server.start()
-    start_routing_startup_tasks(servicer)
+
+    if FORCE_LEADER_ID:
+        elected_leader_id: str | None = FORCE_LEADER_ID
+        is_leader = WORKER_ID == FORCE_LEADER_ID
+        print(
+            f"[rag-worker {WORKER_ID}] forced leader: leader={elected_leader_id} "
+            f"is_leader={is_leader} (RAG_FORCE_LEADER_ID set, skipping DynamoDB election)",
+            flush=True,
+        )
+    else:
+        global leader_election
+        leader_election = LeaderElection(WORKER_ID, LEASE_DURATION_SECONDS)
+        await leader_election.start()
+        elected_leader_id = await leader_election.wait_for_leader(timeout=30.0)
+        is_leader = leader_election.is_leader()
+        print(
+            f"[rag-worker {WORKER_ID}] leader election result: "
+            f"leader={elected_leader_id} is_leader={is_leader}",
+            flush=True,
+        )
+
+    if is_leader:
+        await servicer.handle_routing_tree_join(
+            servicer.build_routing_tree_join_request(),
+            servicer.routing_tree_root_node_id,
+        )
+
+    effective_init_addr = (
+        f"{elected_leader_id}:{PORT}" if elected_leader_id else INIT_ADDR
+    )
+    start_routing_startup_tasks(servicer, effective_init_addr)
     if BOOTSTRAP_QUERY and (BOOTSTRAP_DELAY_SECONDS > 0.0):
         asyncio.create_task(inject_bootstrap_query(servicer))
     await server.wait_for_termination()
+    if leader_election is not None:
+        await leader_election.stop()
 
 
-def start_routing_startup_tasks(servicer: RagWorkerServicer):
+def start_routing_startup_tasks(servicer: RagWorkerServicer, init_addr: str = INIT_ADDR):
     print(
         f"[rag-worker {WORKER_ID}] routing-tree startup selected",
         flush=True,
     )
-    asyncio.create_task(join_routing_tree(servicer))
+    asyncio.create_task(join_routing_tree(servicer, init_addr))
 
 
-async def join_routing_tree(servicer: RagWorkerServicer):
-    if WORKER_ID == INIT_WORKER_ID:
+async def join_routing_tree(servicer: RagWorkerServicer, init_addr: str = INIT_ADDR):
+    if leader_election is not None and leader_election.is_leader():
         print(
             f"[rag-worker {WORKER_ID}] root custodian ready for routing tree "
             f"joined={len(servicer.joined_tree_users)}/{ROUTING_TREE_EXPECTED_USERS}",
@@ -1613,7 +1647,7 @@ async def join_routing_tree(servicer: RagWorkerServicer):
     request = servicer.build_routing_tree_join_request()
     for attempt in range(1, USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS + 1):
         try:
-            async with grpc.aio.insecure_channel(INIT_ADDR) as channel:
+            async with grpc.aio.insecure_channel(init_addr) as channel:
                 stub = rag_pb2_grpc.RagServiceStub(channel)
                 reply = await stub.JoinTree(request, timeout=5.0)
             if not reply.accepted:
@@ -1624,12 +1658,12 @@ async def join_routing_tree(servicer: RagWorkerServicer):
                 servicer.record_user_embedding_record(record)
             servicer.assigned_routing_tree_node_id = reply.tree_node_id
             servicer.assigned_routing_tree_custodian_worker_id = reply.custodian_worker_id
-            servicer.assigned_routing_tree_custodian_addr = reply.custodian_addr or INIT_ADDR
+            servicer.assigned_routing_tree_custodian_addr = reply.custodian_addr or init_addr
             print(
                 f"[rag-worker {WORKER_ID}] joined routing tree "
-                f"root={reply.root_worker_id} addr={INIT_ADDR} "
+                f"root={reply.root_worker_id} addr={init_addr} "
                 f"leaf={reply.tree_node_id} custodian="
-                f"{reply.custodian_worker_id}@{reply.custodian_addr or INIT_ADDR} "
+                f"{reply.custodian_worker_id}@{reply.custodian_addr or init_addr} "
                 f"joined={reply.joined_count}/{reply.expected_count} "
                 f"routing_epoch={reply.routing_epoch} "
                 f"closest_users={len(reply.closest_users)} attempt={attempt}",
@@ -1646,13 +1680,13 @@ async def join_routing_tree(servicer: RagWorkerServicer):
             if attempt == USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS:
                 print(
                     f"[rag-worker {WORKER_ID}] failed to join routing tree "
-                    f"root_addr={INIT_ADDR} attempts={attempt}: {exc}",
+                    f"root_addr={init_addr} attempts={attempt}: {exc}",
                     flush=True,
                 )
                 return
             print(
                 f"[rag-worker {WORKER_ID}] retrying routing-tree join "
-                f"root_addr={INIT_ADDR} attempt={attempt}/"
+                f"root_addr={init_addr} attempt={attempt}/"
                 f"{USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS}: {exc}",
                 flush=True,
             )
@@ -1663,7 +1697,7 @@ async def sync_routing_tree_closest_users(
     servicer: RagWorkerServicer,
     target_addr: str = INIT_ADDR,
 ):
-    if WORKER_ID == INIT_WORKER_ID:
+    if leader_election is not None and leader_election.is_leader():
         return
 
     for attempt in range(1, USER_EMBEDDING_SYNC_RETRY_ATTEMPTS + 1):
