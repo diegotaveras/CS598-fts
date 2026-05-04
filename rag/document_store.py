@@ -297,16 +297,20 @@ class LocalDocumentStore:
         return "\n\n".join(parts)
 
     def _embedding_text_for_pageindex_node(self, node: PageIndexNode) -> str:
-        parts = [
-            f"Title: {node.title}",
-            f"Summary: {node.description}",
-        ]
-        if node.content and node.content != node.description:
-            parts.append(f"Content: {node.content}")
-        parent = self.nodes.get(node.parent_id) if node.parent_id else None
-        if parent is not None:
-            parts.append(f"Parent: {parent.title}")
-        return "\n\n".join(parts)
+        parts = []
+        if node.title:
+            parts.append(f"Title: {node.title}")
+        summary = (
+            node.metadata.get("raw_summary")
+            or node.metadata.get("raw_description")
+            or node.metadata.get("raw_node_summary")
+        )
+        text = node.content
+        if summary:
+            parts.append(f"Summary: {summary}")
+        if text and text != summary:
+            parts.append(f"Text: {text}")
+        return "\n\n".join(parts).strip()
 
     def _descendant_pageindex_nodes(self, root: PageIndexNode) -> list[PageIndexNode]:
         descendants = []
@@ -497,6 +501,9 @@ class LocalDocumentStore:
             "node_type": "pageindex_node",
             "doc_id": doc_id,
             "raw_node_id": raw_node.get("node_id") or raw_node.get("id"),
+            "raw_summary": raw_node.get("summary") or "",
+            "raw_description": raw_node.get("description") or "",
+            "raw_node_summary": raw_node.get("node_summary") or "",
         }
         self._add_node(
             PageIndexNode(
