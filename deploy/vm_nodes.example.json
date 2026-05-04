@@ -1,0 +1,60 @@
+{
+  "init_worker_id": "node1",
+  "port": 9100,
+  "host": "0.0.0.0",
+  "doc_dir": "/data/rag",
+  "neighbor_mode": "all",
+  "bootstrap": {
+    "node_id": "node1",
+    "query": "How many Ulta stores were open in 2023?",
+    "delay_seconds": 180
+  },
+  "defaults": {
+    "ROLE": "rag_worker",
+    "RAG_LOCAL_RETRIEVAL_POLICY": "top1_probe",
+    "RAG_QUERY_DOC_MATCH_THRESHOLD": "0.67",
+    "RAG_QUERY_USER_MATCH_THRESHOLD": "0.0",
+    "RAG_ROUTE_SIMILARITY_DEBUG": "0",
+    "RAG_MULTICAST_RETRY_ATTEMPTS": "60",
+    "RAG_MULTICAST_RETRY_SECONDS": "5",
+    "RAG_USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS": "60",
+    "RAG_USER_EMBEDDING_REGISTER_RETRY_SECONDS": "5",
+    "RAG_USER_EMBEDDING_SYNC_RETRY_ATTEMPTS": "60",
+    "RAG_USER_EMBEDDING_SYNC_RETRY_SECONDS": "5",
+    "RAG_CHAIN_HOP_MAX_HOPS": "4"
+  },
+  "nodes": [
+    {
+      "id": "node1",
+      "addr": "10.0.0.11"
+    },
+    {
+      "id": "node2",
+      "addr": "10.0.0.12"
+    },
+    {
+      "id": "node3",
+      "addr": "10.0.0.13"
+    },
+    {
+      "id": "node4",
+      "addr": "10.0.0.14"
+    },
+    {
+      "id": "node5",
+      "addr": "10.0.0.15"
+    },
+    {
+      "id": "node6",
+      "addr": "10.0.0.16"
+    },
+    {
+      "id": "node7",
+      "addr": "10.0.0.17"
+    },
+    {
+      "id": "node8",
+      "addr": "10.0.0.18"
+    }
+  ]
+}

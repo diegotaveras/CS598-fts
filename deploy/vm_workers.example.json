@@ -1,0 +1,69 @@
+{
+  "init_worker_id": "node1",
+  "port": 9100,
+  "container_port": 9100,
+  "host": "0.0.0.0",
+  "doc_dir": "/data/rag",
+  "workers_per_vm": 4,
+  "total_workers": 32,
+  "neighbor_mode": "all",
+  "bootstrap": {
+    "node_id": "node1",
+    "query": "How many Ulta stores were open in 2023?",
+    "delay_seconds": 240
+  },
+  "defaults": {
+    "ROLE": "rag_worker",
+    "RAG_LOCAL_RETRIEVAL_POLICY": "top1_probe",
+    "RAG_QUERY_DOC_MATCH_THRESHOLD": "0.67",
+    "RAG_QUERY_USER_MATCH_THRESHOLD": "0.0",
+    "RAG_ROUTE_SIMILARITY_DEBUG": "0",
+    "RAG_MULTICAST_RETRY_ATTEMPTS": "60",
+    "RAG_MULTICAST_RETRY_SECONDS": "5",
+    "RAG_USER_EMBEDDING_REGISTER_RETRY_ATTEMPTS": "60",
+    "RAG_USER_EMBEDDING_REGISTER_RETRY_SECONDS": "5",
+    "RAG_USER_EMBEDDING_SYNC_RETRY_ATTEMPTS": "60",
+    "RAG_USER_EMBEDDING_SYNC_RETRY_SECONDS": "5",
+    "RAG_ROUTING_MODE": "join_tree",
+    "RAG_CHAIN_HOP_MAX_HOPS": "4",
+    "RAG_BOOTSTRAP_WAIT_FOR_ROUTING_TREE": "1",
+    "RAG_BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS": "600",
+    "RAG_ROUTING_TREE_RECORD_LIMIT": "2",
+    "RAG_ROUTING_TREE_DELTA": "0.0005",
+    "RAG_ROUTING_TREE_CLOSEST_USERS": "2"
+  },
+  "vms": [
+    {
+      "id": "vm1",
+      "addr": "c220g5-110429.wisc.cloudlab.us"
+    },
+    {
+      "id": "vm2",
+      "addr": "c220g5-120125.wisc.cloudlab.us"
+    },
+    {
+      "id": "vm3",
+      "addr": "c220g5-110430.wisc.cloudlab.us"
+    },
+    {
+      "id": "vm4",
+      "addr": "c220g5-110404.wisc.cloudlab.us"
+    },
+    {
+      "id": "vm5",
+      "addr": "c220g5-110418.wisc.cloudlab.us"
+    },
+    {
+      "id": "vm6",
+      "addr": "c220g5-120127.wisc.cloudlab.us"
+    },
+    {
+      "id": "vm7",
+      "addr": "c220g5-110421.wisc.cloudlab.us"
+    },
+    {
+      "id": "vm8",
+      "addr": "c220g5-110401.wisc.cloudlab.us"
+    }
+  ]
+}
