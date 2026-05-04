@@ -1,9 +1,12 @@
 import asyncio
 import json
 import os
+import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 import grpc
 import numpy as np
@@ -27,6 +30,29 @@ class RoutingMode(str, Enum):
                 return mode
         valid_modes = ", ".join(mode.value for mode in cls)
         raise ValueError(f"Invalid RAG_ROUTING_MODE={value!r}; expected one of: {valid_modes}")
+
+
+class BenchmarkEventLogger:
+    def __init__(self, path: str):
+        self.path = Path(path) if path else None
+        self.lock = threading.Lock()
+        if self.path:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def emit(self, event: str, **fields):
+        if not self.path:
+            return
+        payload = {
+            "event": event,
+            "ts_unix": time.time(),
+            "ts_monotonic": time.monotonic(),
+            "worker_id": WORKER_ID,
+            **fields,
+        }
+        line = json.dumps(payload, sort_keys=True)
+        with self.lock:
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
 
 
 @dataclass
@@ -163,6 +189,44 @@ LEASE_DURATION_SECONDS = int(os.getenv("RAG_LEASE_DURATION_SECONDS", "15"))
 # e.g. RAG_FORCE_LEADER_ID=node1  → node1 is always root; remove var to use DynamoDB election.
 FORCE_LEADER_ID: str | None = os.getenv("RAG_FORCE_LEADER_ID")
 
+
+def _parse_worker_addr_map() -> dict[str, str]:
+    raw = os.getenv("RAG_WORKER_ADDR_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(
+            f"[rag-worker {WORKER_ID}] invalid RAG_WORKER_ADDR_MAP JSON: {exc}",
+            flush=True,
+        )
+        return {}
+    if not isinstance(parsed, dict):
+        print(
+            f"[rag-worker {WORKER_ID}] invalid RAG_WORKER_ADDR_MAP: expected object",
+            flush=True,
+        )
+        return {}
+    return {str(worker_id): str(addr) for worker_id, addr in parsed.items()}
+
+
+WORKER_ADDR_MAP = _parse_worker_addr_map()
+
+
+def addr_for_worker_id(worker_id: str | None) -> str:
+    if not worker_id:
+        return INIT_ADDR
+    if worker_id in WORKER_ADDR_MAP:
+        return WORKER_ADDR_MAP[worker_id]
+    if worker_id == INIT_WORKER_ID:
+        return INIT_ADDR
+    return f"{worker_id}:{PORT}"
+
+
+BENCHMARK_EVENTS_PATH = os.getenv("RAG_BENCHMARK_EVENTS_PATH", "")
+benchmark_events = BenchmarkEventLogger(BENCHMARK_EVENTS_PATH)
+
 leader_election: LeaderElection | None = None
 
 
@@ -209,7 +273,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 flush=True,
             )
             return rag_pb2.JoinTreeReply(
-                root_worker_id=INIT_WORKER_ID,
+                root_worker_id=self.current_root_worker_id(),
                 accepted=False,
                 joined_count=0,
                 expected_count=ROUTING_TREE_EXPECTED_USERS,
@@ -229,7 +293,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 flush=True,
             )
             return rag_pb2.JoinTreeReply(
-                root_worker_id=INIT_WORKER_ID,
+                root_worker_id=self.current_root_worker_id(),
                 accepted=False,
                 joined_count=len(self.joined_tree_users),
                 expected_count=ROUTING_TREE_EXPECTED_USERS,
@@ -279,10 +343,27 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         )
 
     def can_handle_routing_tree_node(self, tree_node_id: str):
-        if tree_node_id == self.routing_tree_root_node_id and self.worker_id == INIT_WORKER_ID:
+        if tree_node_id == self.routing_tree_root_node_id and self.is_root_custodian():
             return True
         node = self.routing_tree_nodes.get(tree_node_id)
         return node is not None and node.custodian_worker_id == self.worker_id
+
+    def current_root_worker_id(self):
+        if FORCE_LEADER_ID:
+            return FORCE_LEADER_ID
+        if leader_election is not None:
+            return leader_election.get_leader_id() or INIT_WORKER_ID
+        return INIT_WORKER_ID
+
+    def current_root_addr(self):
+        return addr_for_worker_id(self.current_root_worker_id())
+
+    def is_root_custodian(self):
+        if FORCE_LEADER_ID:
+            return self.worker_id == FORCE_LEADER_ID
+        if leader_election is not None:
+            return leader_election.is_leader()
+        return self.worker_id == INIT_WORKER_ID
 
     def invalid_join_embedding_reason(self, request):
         embedding_len = len(request.embedding)
@@ -301,7 +382,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         node = self.routing_tree_nodes.get(tree_node_id)
         if node is None:
             return rag_pb2.JoinTreeReply(
-                root_worker_id=INIT_WORKER_ID,
+                root_worker_id=self.current_root_worker_id(),
                 accepted=False,
                 joined_count=len(self.joined_tree_users),
                 expected_count=ROUTING_TREE_EXPECTED_USERS,
@@ -331,7 +412,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             custodian_addr = assigned_node.custodian_addr or custodian_addr
         closest_entries = self.closest_user_entries_by_worker.get(request.worker_id, [])
         return rag_pb2.JoinTreeReply(
-            root_worker_id=self.worker_id,
+            root_worker_id=self.current_root_worker_id(),
             accepted=True,
             joined_count=len(self.joined_tree_users),
             expected_count=ROUTING_TREE_EXPECTED_USERS,
@@ -500,7 +581,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         return root
 
     def ensure_routing_tree_if_root(self, tree_node_id: str):
-        if tree_node_id == self.routing_tree_root_node_id and self.worker_id == INIT_WORKER_ID:
+        if tree_node_id == self.routing_tree_root_node_id and self.is_root_custodian():
             self.ensure_routing_tree()
 
     async def insert_routing_tree_peer(self, entry, tree_node_id: str):
@@ -783,7 +864,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 flush=True,
             )
             return rag_pb2.JoinTreeReply(
-                root_worker_id=INIT_WORKER_ID,
+                root_worker_id=self.current_root_worker_id(),
                 accepted=False,
                 joined_count=len(self.joined_tree_users),
                 expected_count=ROUTING_TREE_EXPECTED_USERS,
@@ -794,7 +875,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             )
 
     def with_local_join_counts(self, reply):
-        if self.worker_id == INIT_WORKER_ID:
+        if self.is_root_custodian():
             reply.root_worker_id = self.worker_id
             reply.joined_count = len(self.joined_tree_users)
             reply.expected_count = ROUTING_TREE_EXPECTED_USERS
@@ -868,6 +949,13 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
     async def SendEvidence(self, request, context):
         evidence = self.evidence_by_query.setdefault(request.query_id, [])
         evidence.extend(request.evidence)
+        benchmark_events.emit(
+            "evidence_received",
+            query_id=request.query_id,
+            evidence_count=len(request.evidence),
+            total_evidence_count=len(evidence),
+            source_workers=sorted({item.worker_id for item in request.evidence}),
+        )
         print(
             f"[rag-worker {self.worker_id}] received evidence query_id={request.query_id} "
             f"count={len(request.evidence)} total={len(evidence)}",
@@ -902,8 +990,25 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             visited_worker_ids.append(self.worker_id)
         if coordinator_addr == ADVERTISE_ADDR:
             self.query_by_id[query_id] = request.query
+            benchmark_events.emit(
+                "query_started",
+                query_id=query_id,
+                query=request.query,
+                coordinator_addr=coordinator_addr,
+                max_hops=max_hops,
+                top_k=request.top_k or 5,
+            )
             self.start_summary_task(query_id)
 
+        benchmark_events.emit(
+            "route_received",
+            query_id=query_id,
+            query=request.query,
+            coordinator_addr=coordinator_addr,
+            curr_hop=curr_hop,
+            max_hops=max_hops,
+            visited_worker_ids=visited_worker_ids,
+        )
         print(
             f"[rag-worker {self.worker_id}] received query_id={query_id} "
             f"coordinator={coordinator_addr} hop={curr_hop}/{max_hops} "
@@ -920,6 +1025,16 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             max_length=BERT_MAX_LENGTH,
         )
         for score, node in local_candidates:
+            benchmark_events.emit(
+                "local_candidate",
+                query_id=query_id,
+                node_id=node.node_id,
+                title=node.title,
+                score=float(score),
+                doc_id=node.metadata.get("doc_id", ""),
+                source_path=node.metadata.get("source_path", ""),
+                curr_hop=curr_hop,
+            )
             print(
                 f"[rag-worker {self.worker_id}] local candidate query_id={query_id} "
                 f"score={score:.4f} node={node.node_id} title={node.title}",
@@ -948,6 +1063,14 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 f"policy={LOCAL_RETRIEVAL_POLICY} candidates={len(probe_candidates)} "
                 f"best_score={best_score_text}",
                 flush=True,
+            )
+            benchmark_events.emit(
+                "local_probe_selected",
+                query_id=query_id,
+                policy=LOCAL_RETRIEVAL_POLICY,
+                candidate_count=len(probe_candidates),
+                best_score=float(best_score) if best_score is not None else None,
+                curr_hop=curr_hop,
             )
             self.start_pageindex_probe_then_chain_hop_task(
                 request,
@@ -1075,6 +1198,13 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         visited_worker_ids: list[str],
     ):
         if curr_hop + 1 >= max_hops:
+            benchmark_events.emit(
+                "chain_hop_limit_reached",
+                query_id=query_id,
+                curr_hop=curr_hop,
+                max_hops=max_hops,
+                visited_worker_ids=visited_worker_ids,
+            )
             print(
                 f"[rag-worker {self.worker_id}] chain hop limit reached "
                 f"query_id={query_id} hop={curr_hop}/{max_hops}",
@@ -1105,6 +1235,13 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         visited_worker_ids: list[str],
     ):
         if curr_hop + 1 >= max_hops:
+            benchmark_events.emit(
+                "chain_hop_limit_reached",
+                query_id=query_id,
+                curr_hop=curr_hop,
+                max_hops=max_hops,
+                visited_worker_ids=visited_worker_ids,
+            )
             print(
                 f"[rag-worker {self.worker_id}] chain hop limit reached "
                 f"query_id={query_id} hop={curr_hop}/{max_hops}",
@@ -1132,8 +1269,16 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         target = await self.choose_chain_hop_target(
             request.query,
             set(visited_worker_ids),
+            query_id=query_id,
         )
         if target is None:
+            benchmark_events.emit(
+                "chain_hop_no_target",
+                query_id=query_id,
+                curr_hop=curr_hop,
+                max_hops=max_hops,
+                visited_worker_ids=visited_worker_ids,
+            )
             print(
                 f"[rag-worker {self.worker_id}] no chain-hop target "
                 f"query_id={query_id} hop={curr_hop}/{max_hops}",
@@ -1152,14 +1297,20 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         )
         await self.send_chain_query_to_target(target, next_request)
 
-    async def choose_chain_hop_target(self, query: str, visited_worker_ids: set[str]):
+    async def choose_chain_hop_target(
+        self,
+        query: str,
+        visited_worker_ids: set[str],
+        query_id: str = "",
+    ):
         if (
-            self.worker_id != INIT_WORKER_ID
+            not self.is_root_custodian()
             and self.worker_id not in self.closest_user_entries_by_worker
             and len(self.user_embedding_registry) <= 1
         ):
             await self.sync_user_embedding_registry_once(
-                target_addr=self.assigned_routing_tree_custodian_addr or INIT_ADDR
+                target_addr=self.assigned_routing_tree_custodian_addr
+                or self.current_root_addr()
             )
 
         query_embedding = self.bert_embedder.embed_text(
@@ -1188,6 +1339,15 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         scored.sort(key=lambda item: item[0], reverse=True)
         score, worker_id, advertise_addr = scored[0]
         if score < QUERY_USER_MATCH_THRESHOLD:
+            benchmark_events.emit(
+                "chain_hop_no_user_match",
+                query_id=query_id,
+                best_worker_id=worker_id,
+                best_addr=advertise_addr,
+                best_score=float(score),
+                user_threshold=QUERY_USER_MATCH_THRESHOLD,
+                candidate_count=len(registry_entries),
+            )
             print(
                 f"[rag-worker {self.worker_id}] no chain-hop user match "
                 f"best_worker_id={worker_id} best_addr={advertise_addr} "
@@ -1205,6 +1365,15 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             f"candidate_count={len(registry_entries)}",
             flush=True,
         )
+        benchmark_events.emit(
+            "chain_hop_target_selected",
+            query_id=query_id,
+            target_worker_id=worker_id,
+            target_addr=advertise_addr,
+            score=float(score),
+            user_threshold=QUERY_USER_MATCH_THRESHOLD,
+            candidate_count=len(registry_entries),
+        )
         return advertise_addr
 
     async def send_chain_query_to_target(self, target, request):
@@ -1213,6 +1382,14 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 async with grpc.aio.insecure_channel(target) as channel:
                     stub = rag_pb2_grpc.RagServiceStub(channel)
                     await stub.RouteQuery(request, timeout=5.0)
+                benchmark_events.emit(
+                    "chain_hop_sent",
+                    query_id=request.query_id,
+                    target_addr=target,
+                    curr_hop=request.curr_hop,
+                    max_hops=request.max_hops,
+                    attempt=attempt,
+                )
                 print(
                     f"[rag-worker {self.worker_id}] chain-hop query_id={request.query_id} "
                     f"to={target} hop={request.curr_hop}/{request.max_hops} "
@@ -1286,6 +1463,11 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
     ):
         doc_ids = self._candidate_doc_ids(local_candidates)
         if not doc_ids:
+            benchmark_events.emit(
+                "pageindex_skipped",
+                query_id=query_id,
+                reason="no_doc_ids",
+            )
             print(
                 f"[rag-worker {self.worker_id}] no PageIndex doc_ids to query "
                 f"for query_id={query_id}",
@@ -1293,6 +1475,12 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             )
             return
         if not self.store.pageindex_api_key:
+            benchmark_events.emit(
+                "pageindex_skipped",
+                query_id=query_id,
+                reason="missing_api_key",
+                doc_ids=doc_ids,
+            )
             print(
                 f"[rag-worker {self.worker_id}] PAGE_INDEX_API_KEY is missing; "
                 f"skipping PageIndex retrieval for query_id={query_id}",
@@ -1315,6 +1503,12 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
     ) -> int:
         doc_ids = self._candidate_doc_ids(local_candidates)
         if not doc_ids:
+            benchmark_events.emit(
+                "pageindex_skipped",
+                query_id=query_id,
+                reason="no_doc_ids",
+                retrieval_reason=reason,
+            )
             print(
                 f"[rag-worker {self.worker_id}] no PageIndex doc_ids to query "
                 f"for query_id={query_id} reason={reason}",
@@ -1322,6 +1516,13 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             )
             return 0
         if not self.store.pageindex_api_key:
+            benchmark_events.emit(
+                "pageindex_skipped",
+                query_id=query_id,
+                reason="missing_api_key",
+                retrieval_reason=reason,
+                doc_ids=doc_ids,
+            )
             print(
                 f"[rag-worker {self.worker_id}] PAGE_INDEX_API_KEY is missing; "
                 f"skipping PageIndex retrieval for query_id={query_id} reason={reason}",
@@ -1334,6 +1535,12 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             f"query_id={query_id} doc_ids={doc_ids} reason={reason}",
             flush=True,
         )
+        benchmark_events.emit(
+            "pageindex_retrieval_started",
+            query_id=query_id,
+            doc_ids=doc_ids,
+            retrieval_reason=reason,
+        )
         try:
             evidence = await self.retrieve_pageindex_documents_once(
                 query_id,
@@ -1345,6 +1552,13 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 f"[rag-worker {self.worker_id}] PageIndex retrieval failed "
                 f"query_id={query_id} doc_ids={doc_ids} reason={reason}: {exc}",
                 flush=True,
+            )
+            benchmark_events.emit(
+                "pageindex_retrieval_failed",
+                query_id=query_id,
+                doc_ids=doc_ids,
+                retrieval_reason=reason,
+                error=str(exc),
             )
             return 0
 
@@ -1371,6 +1585,13 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 query_id,
                 evidence,
             )
+        benchmark_events.emit(
+            "pageindex_retrieval_completed",
+            query_id=query_id,
+            doc_ids=doc_ids,
+            retrieval_reason=reason,
+            evidence_count=len(evidence),
+        )
         return len(evidence)
 
     def _candidate_doc_ids(self, local_candidates):
@@ -1398,6 +1619,12 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             f"query_id={query_id} doc_ids={doc_ids} reason=threshold_match",
             flush=True,
         )
+        benchmark_events.emit(
+            "pageindex_retrieval_started",
+            query_id=query_id,
+            doc_ids=doc_ids,
+            retrieval_reason="threshold_match",
+        )
         try:
             evidence = await self.retrieve_pageindex_documents_once(
                 query_id,
@@ -1409,6 +1636,13 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 f"[rag-worker {self.worker_id}] PageIndex retrieval failed "
                 f"query_id={query_id} doc_ids={doc_ids}: {exc}",
                 flush=True,
+            )
+            benchmark_events.emit(
+                "pageindex_retrieval_failed",
+                query_id=query_id,
+                doc_ids=doc_ids,
+                retrieval_reason="threshold_match",
+                error=str(exc),
             )
             return
         print(
@@ -1432,6 +1666,13 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             query_id,
             evidence,
         )
+        benchmark_events.emit(
+            "pageindex_retrieval_completed",
+            query_id=query_id,
+            doc_ids=doc_ids,
+            retrieval_reason="threshold_match",
+            evidence_count=len(evidence),
+        )
 
     async def send_evidence(self, coordinator_addr: str, query_id: str, evidence):
         try:
@@ -1449,12 +1690,26 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 f"coordinator={coordinator_addr} accepted={reply.accepted_count}",
                 flush=True,
             )
+            benchmark_events.emit(
+                "evidence_sent",
+                query_id=query_id,
+                coordinator_addr=coordinator_addr,
+                evidence_count=len(evidence),
+                accepted_count=reply.accepted_count,
+            )
             return True
         except Exception as exc:
             print(
                 f"[rag-worker {self.worker_id}] failed to send evidence "
                 f"query_id={query_id} coordinator={coordinator_addr}: {exc}",
                 flush=True,
+            )
+            benchmark_events.emit(
+                "evidence_send_failed",
+                query_id=query_id,
+                coordinator_addr=coordinator_addr,
+                evidence_count=len(evidence),
+                error=str(exc),
             )
             return False
 
@@ -1654,6 +1909,14 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 f"{NOT_FOUND_ANSWER}",
                 flush=True,
             )
+            benchmark_events.emit(
+                "final_answer",
+                query_id=query_id,
+                answer=NOT_FOUND_ANSWER,
+                evidence_count=0,
+                not_found=True,
+                llm_called=False,
+            )
             return
 
         context = self.build_summary_context(evidence)
@@ -1680,12 +1943,26 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 f"query_id={query_id}: {exc}",
                 flush=True,
             )
+            benchmark_events.emit(
+                "final_answer_failed",
+                query_id=query_id,
+                evidence_count=len(evidence),
+                error=str(exc),
+            )
             return
 
         print(
             f"[rag-worker {self.worker_id}] final answer query_id={query_id}: "
             f"{answer}",
             flush=True,
+        )
+        benchmark_events.emit(
+            "final_answer",
+            query_id=query_id,
+            answer=answer,
+            evidence_count=len(evidence),
+            not_found=False,
+            llm_called=True,
         )
 
     def build_summary_context(self, evidence):
@@ -1838,9 +2115,7 @@ async def serve():
             servicer.routing_tree_root_node_id,
         )
 
-    effective_init_addr = (
-        f"{elected_leader_id}:{PORT}" if elected_leader_id else INIT_ADDR
-    )
+    effective_init_addr = addr_for_worker_id(elected_leader_id)
     start_routing_startup_tasks(servicer, effective_init_addr)
     if BOOTSTRAP_QUERY and (BOOTSTRAP_DELAY_SECONDS > 0.0):
         asyncio.create_task(inject_bootstrap_query(servicer))
@@ -1858,7 +2133,7 @@ def start_routing_startup_tasks(servicer: RagWorkerServicer, init_addr: str = IN
 
 
 async def join_routing_tree(servicer: RagWorkerServicer, init_addr: str = INIT_ADDR):
-    if leader_election is not None and leader_election.is_leader():
+    if servicer.is_root_custodian():
         print(
             f"[rag-worker {WORKER_ID}] root custodian ready for routing tree "
             f"joined={len(servicer.joined_tree_users)}/{ROUTING_TREE_EXPECTED_USERS}",
@@ -1919,7 +2194,7 @@ async def sync_routing_tree_closest_users(
     servicer: RagWorkerServicer,
     target_addr: str = INIT_ADDR,
 ):
-    if leader_election is not None and leader_election.is_leader():
+    if servicer.is_root_custodian():
         return
 
     for attempt in range(1, USER_EMBEDDING_SYNC_RETRY_ATTEMPTS + 1):
@@ -1961,7 +2236,7 @@ async def inject_bootstrap_query(servicer: RagWorkerServicer):
     await servicer.RouteQuery(request, context=None)
 
 async def wait_for_bootstrap_routing_tree(servicer: RagWorkerServicer):
-    if WORKER_ID != INIT_WORKER_ID:
+    if not servicer.is_root_custodian():
         return
 
     deadline = asyncio.get_running_loop().time() + BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS
