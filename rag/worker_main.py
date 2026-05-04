@@ -210,6 +210,26 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 custodian_addr=ADVERTISE_ADDR,
             )
 
+        invalid_join_reason = self.invalid_join_embedding_reason(request)
+        if invalid_join_reason:
+            print(
+                f"[rag-worker {self.worker_id}] rejected JoinTree "
+                f"from={request.worker_id} tree_node_id={tree_node_id}: "
+                f"{invalid_join_reason} source_roots={request.source_root_count} "
+                f"source_nodes={list(request.source_node_ids)[:5]}",
+                flush=True,
+            )
+            return rag_pb2.JoinTreeReply(
+                root_worker_id=INIT_WORKER_ID,
+                accepted=False,
+                joined_count=len(self.joined_tree_users),
+                expected_count=ROUTING_TREE_EXPECTED_USERS,
+                routing_epoch=self.routing_epoch,
+                tree_node_id=tree_node_id,
+                custodian_worker_id=self.worker_id,
+                custodian_addr=ADVERTISE_ADDR,
+            )
+
         reply = await self.handle_routing_tree_join(request, tree_node_id)
         return reply
 
@@ -254,6 +274,18 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             return True
         node = self.routing_tree_nodes.get(tree_node_id)
         return node is not None and node.custodian_worker_id == self.worker_id
+
+    def invalid_join_embedding_reason(self, request):
+        embedding_len = len(request.embedding)
+        if embedding_len == 0:
+            return "empty user embedding"
+        declared_dimension = request.embedding_dimension or embedding_len
+        if declared_dimension != embedding_len:
+            return (
+                f"embedding dimension mismatch declared={declared_dimension} "
+                f"actual={embedding_len}"
+            )
+        return ""
 
     async def handle_routing_tree_join(self, request, tree_node_id: str):
         self.ensure_routing_tree_if_root(tree_node_id)
