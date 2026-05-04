@@ -18,6 +18,7 @@ services:
       RAG_DOC_DIR: /data/rag
       HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node2:9100,node3:9100,node4:9100
+      RAG_FORCE_LEADER_ID: ${RAG_FORCE_LEADER_ID:-node1}
       RAG_BOOTSTRAP_QUERY: ${RAG_QUERY:-How many shares of did they repurchase during 2025?}
       RAG_BOOTSTRAP_DELAY_SECONDS: ${RAG_BOOTSTRAP_DELAY_SECONDS:-2.0}
 
@@ -39,6 +40,7 @@ services:
       RAG_DOC_DIR: /data/rag
       HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node1:9100,node3:9100,node4:9100
+      RAG_FORCE_LEADER_ID: ${RAG_FORCE_LEADER_ID:-node1}
 
   node3:
     build: .
@@ -58,6 +60,7 @@ services:
       RAG_DOC_DIR: /data/rag
       HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node1:9100,node2:9100,node4:9100
+      RAG_FORCE_LEADER_ID: ${RAG_FORCE_LEADER_ID:-node1}
 
   node4:
     build: .
@@ -77,3 +80,4 @@ services:
       RAG_DOC_DIR: /data/rag
       HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node1:9100,node2:9100,node3:9100
+      RAG_FORCE_LEADER_ID: ${RAG_FORCE_LEADER_ID:-node1}
