@@ -95,7 +95,9 @@ QUERY_DOC_MATCH_THRESHOLD = float(
         os.getenv("RAG_LOCAL_MATCH_THRESHOLD", "0.73"),
     )
 )
-QUERY_USER_MATCH_THRESHOLD = float(os.getenv("RAG_QUERY_USER_MATCH_THRESHOLD", "0.73"))
+LOCAL_RETRIEVAL_POLICY = os.getenv("RAG_LOCAL_RETRIEVAL_POLICY", "top1_probe").strip().lower()
+QUERY_USER_MATCH_THRESHOLD = float(os.getenv("RAG_QUERY_USER_MATCH_THRESHOLD", "0.7"))
+NOT_FOUND_ANSWER = "The answer is not found in the documents."
 PAGEINDEX_RETRIEVAL_POLL_SECONDS = float(
     os.getenv("RAG_PAGEINDEX_RETRIEVAL_POLL_SECONDS", "2.0")
 )
@@ -156,7 +158,7 @@ BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS = float(
 )
 MULTICAST_RETRY_ATTEMPTS = int(os.getenv("RAG_MULTICAST_RETRY_ATTEMPTS", "6"))
 MULTICAST_RETRY_SECONDS = float(os.getenv("RAG_MULTICAST_RETRY_SECONDS", "5.0"))
-LEASE_DURATION_SECONDS = int(os.getenv("RAG_LEASE_DURATION_SECONDS", "30"))
+LEASE_DURATION_SECONDS = int(os.getenv("RAG_LEASE_DURATION_SECONDS", "15"))
 # Set RAG_FORCE_LEADER_ID to skip DynamoDB election and statically assign a leader.
 # e.g. RAG_FORCE_LEADER_ID=node1  → node1 is always root; remove var to use DynamoDB election.
 FORCE_LEADER_ID: str | None = os.getenv("RAG_FORCE_LEADER_ID")
@@ -900,6 +902,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             visited_worker_ids.append(self.worker_id)
         if coordinator_addr == ADVERTISE_ADDR:
             self.query_by_id[query_id] = request.query
+            self.start_summary_task(query_id)
 
         print(
             f"[rag-worker {self.worker_id}] received query_id={query_id} "
@@ -934,46 +937,132 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
                 )
             )
 
-        matched_candidates = [
-            (score, node)
-            for score, node in local_candidates
-            if score >= QUERY_DOC_MATCH_THRESHOLD
-        ]
-        if matched_candidates:
-            print(
-                f"[rag-worker {self.worker_id}] local document match query_id={query_id} "
-                f"doc_threshold={QUERY_DOC_MATCH_THRESHOLD:.4f} "
-                f"matches={len(matched_candidates)}/{len(local_candidates)}",
-                flush=True,
-            )
-        else:
+        if LOCAL_RETRIEVAL_POLICY in {"top1_probe", "topk_probe"}:
+            probe_candidates = local_candidates[:1]
+            if LOCAL_RETRIEVAL_POLICY == "topk_probe":
+                probe_candidates = local_candidates
             best_score = local_candidates[0][0] if local_candidates else None
             best_score_text = f"{best_score:.4f}" if best_score is not None else "none"
             print(
-                f"[rag-worker {self.worker_id}] no local document match query_id={query_id} "
-                f"doc_threshold={QUERY_DOC_MATCH_THRESHOLD:.4f} "
+                f"[rag-worker {self.worker_id}] local retrieval probe query_id={query_id} "
+                f"policy={LOCAL_RETRIEVAL_POLICY} candidates={len(probe_candidates)} "
                 f"best_score={best_score_text}",
                 flush=True,
             )
-
-        self.start_pageindex_retrieval_task(
-            query_id,
-            request.query,
-            coordinator_addr,
-            matched_candidates,
-        )
-        if not matched_candidates:
-            self.start_chain_hop_forward_task(
+            self.start_pageindex_probe_then_chain_hop_task(
                 request,
                 query_id,
                 coordinator_addr,
                 curr_hop,
                 max_hops,
                 visited_worker_ids,
+                probe_candidates,
             )
+        else:
+            matched_candidates = [
+                (score, node)
+                for score, node in local_candidates
+                if score >= QUERY_DOC_MATCH_THRESHOLD
+            ]
+            if matched_candidates:
+                print(
+                    f"[rag-worker {self.worker_id}] local document match query_id={query_id} "
+                    f"doc_threshold={QUERY_DOC_MATCH_THRESHOLD:.4f} "
+                    f"matches={len(matched_candidates)}/{len(local_candidates)}",
+                    flush=True,
+                )
+            else:
+                best_score = local_candidates[0][0] if local_candidates else None
+                best_score_text = f"{best_score:.4f}" if best_score is not None else "none"
+                print(
+                    f"[rag-worker {self.worker_id}] no local document match query_id={query_id} "
+                    f"doc_threshold={QUERY_DOC_MATCH_THRESHOLD:.4f} "
+                    f"best_score={best_score_text}",
+                    flush=True,
+                )
+
+            self.start_pageindex_retrieval_task(
+                query_id,
+                request.query,
+                coordinator_addr,
+                matched_candidates,
+            )
+            if not matched_candidates:
+                self.start_chain_hop_forward_task(
+                    request,
+                    query_id,
+                    coordinator_addr,
+                    curr_hop,
+                    max_hops,
+                    visited_worker_ids,
+                )
         return rag_pb2.RouteQueryReply(
             worker_id=self.worker_id,
             candidates=candidates,
+        )
+
+    def start_pageindex_probe_then_chain_hop_task(
+        self,
+        request,
+        query_id: str,
+        coordinator_addr: str,
+        curr_hop: int,
+        max_hops: int,
+        visited_worker_ids: list[str],
+        local_candidates,
+    ):
+        task = asyncio.create_task(
+            self.pageindex_probe_then_maybe_chain_hop(
+                request,
+                query_id,
+                coordinator_addr,
+                curr_hop,
+                max_hops,
+                visited_worker_ids,
+                local_candidates,
+            )
+        )
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+
+    async def pageindex_probe_then_maybe_chain_hop(
+        self,
+        request,
+        query_id: str,
+        coordinator_addr: str,
+        curr_hop: int,
+        max_hops: int,
+        visited_worker_ids: list[str],
+        local_candidates,
+    ):
+        evidence_count = await self.retrieve_and_send_pageindex_documents(
+            query_id,
+            request.query,
+            coordinator_addr,
+            local_candidates,
+            reason="local_probe",
+        )
+        if evidence_count > 0:
+            print(
+                f"[rag-worker {self.worker_id}] local probe found evidence "
+                f"query_id={query_id} evidence_count={evidence_count}; "
+                "not forwarding chain hop",
+                flush=True,
+            )
+            return
+
+        print(
+            f"[rag-worker {self.worker_id}] local probe found no evidence "
+            f"query_id={query_id}; forwarding chain hop if available",
+            flush=True,
+        )
+        await self.forward_chain_hop_if_available(
+            request,
+            query_id,
+            coordinator_addr,
+            curr_hop,
+            max_hops,
+            visited_worker_ids,
         )
 
     def start_chain_hop_forward_task(
@@ -1005,6 +1094,31 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         )
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
+
+    async def forward_chain_hop_if_available(
+        self,
+        request,
+        query_id: str,
+        coordinator_addr: str,
+        curr_hop: int,
+        max_hops: int,
+        visited_worker_ids: list[str],
+    ):
+        if curr_hop + 1 >= max_hops:
+            print(
+                f"[rag-worker {self.worker_id}] chain hop limit reached "
+                f"query_id={query_id} hop={curr_hop}/{max_hops}",
+                flush=True,
+            )
+            return
+        await self.forward_chain_hop(
+            request,
+            query_id,
+            coordinator_addr,
+            curr_hop,
+            max_hops,
+            visited_worker_ids,
+        )
 
     async def forward_chain_hop(
         self,
@@ -1191,6 +1305,74 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
 
+    async def retrieve_and_send_pageindex_documents(
+        self,
+        query_id: str,
+        query: str,
+        coordinator_addr: str,
+        local_candidates,
+        reason: str,
+    ) -> int:
+        doc_ids = self._candidate_doc_ids(local_candidates)
+        if not doc_ids:
+            print(
+                f"[rag-worker {self.worker_id}] no PageIndex doc_ids to query "
+                f"for query_id={query_id} reason={reason}",
+                flush=True,
+            )
+            return 0
+        if not self.store.pageindex_api_key:
+            print(
+                f"[rag-worker {self.worker_id}] PAGE_INDEX_API_KEY is missing; "
+                f"skipping PageIndex retrieval for query_id={query_id} reason={reason}",
+                flush=True,
+            )
+            return 0
+
+        print(
+            f"[rag-worker {self.worker_id}] starting PageIndex retrieval "
+            f"query_id={query_id} doc_ids={doc_ids} reason={reason}",
+            flush=True,
+        )
+        try:
+            evidence = await self.retrieve_pageindex_documents_once(
+                query_id,
+                query,
+                doc_ids,
+            )
+        except Exception as exc:
+            print(
+                f"[rag-worker {self.worker_id}] PageIndex retrieval failed "
+                f"query_id={query_id} doc_ids={doc_ids} reason={reason}: {exc}",
+                flush=True,
+            )
+            return 0
+
+        print(
+            f"[rag-worker {self.worker_id}] PageIndex retrieval evidence "
+            f"query_id={query_id} doc_ids={doc_ids} reason={reason} "
+            f"count={len(evidence)}",
+            flush=True,
+        )
+        for item in evidence:
+            print(
+                f"[rag-worker {self.worker_id}] local evidence query_id={query_id} "
+                f"node={item.node_id} title={item.title} metadata={item.metadata_json}",
+                flush=True,
+            )
+            print(
+                f"[rag-worker {self.worker_id}] local evidence content "
+                f"query_id={query_id} node={item.node_id}: {item.content}",
+                flush=True,
+            )
+        if evidence:
+            await self.send_evidence(
+                coordinator_addr,
+                query_id,
+                evidence,
+            )
+        return len(evidence)
+
     def _candidate_doc_ids(self, local_candidates):
         doc_ids = []
         seen = set()
@@ -1213,7 +1395,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
     ):
         print(
             f"[rag-worker {self.worker_id}] starting PageIndex retrieval "
-            f"query_id={query_id} doc_ids={doc_ids}",
+            f"query_id={query_id} doc_ids={doc_ids} reason=threshold_match",
             flush=True,
         )
         try:
@@ -1457,11 +1639,19 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         await asyncio.sleep(COORDINATOR_SUMMARY_DELAY_SECONDS)
         query = self.query_by_id.get(query_id)
         evidence = self.evidence_by_query.get(query_id, [])
-        if not query or not evidence:
+        if not query:
             self.summary_tasks.pop(query_id, None)
             print(
-                f"[rag-worker {self.worker_id}] no evidence to summarize "
+                f"[rag-worker {self.worker_id}] no query to summarize "
                 f"query_id={query_id}",
+                flush=True,
+            )
+            return
+        if not evidence:
+            self.summary_tasks.pop(query_id, None)
+            print(
+                f"[rag-worker {self.worker_id}] final answer query_id={query_id}: "
+                f"{NOT_FOUND_ANSWER}",
                 flush=True,
             )
             return
