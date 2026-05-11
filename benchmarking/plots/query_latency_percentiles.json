@@ -1,0 +1,11 @@
+{
+  "count": 216,
+  "mean": 20.385675036537776,
+  "modeled_average_hops": 2.800925925925926,
+  "modeled_average_hops_source": "mean(nodes_contacted)",
+  "modeled_summary_seconds": 5.2,
+  "p50": 18.18537082258707,
+  "p90": 28.06354165010262,
+  "p95": 34.614966409149545,
+  "p99": 44.59023804129176
+}
