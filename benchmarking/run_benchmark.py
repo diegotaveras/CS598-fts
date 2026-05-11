@@ -44,6 +44,15 @@ def parse_args():
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--max-hops", type=int, default=4)
     parser.add_argument(
+        "--mode",
+        choices=["chain_hop", "local_only", "broadcast"],
+        default="",
+        help=(
+            "Optional routing mode override for every row. "
+            "If omitted, each row's mode field is used, defaulting to chain_hop."
+        ),
+    )
+    parser.add_argument(
         "--request-timeout",
         type=float,
         default=10.0,
@@ -180,7 +189,7 @@ async def send_route_query(endpoint_addr: str, row: dict, coordinator_addr: str,
 
 
 async def dispatch_row(row: dict, endpoint_by_worker: dict, args, output_path: Path):
-    mode = row.get("mode", "chain_hop")
+    mode = args.mode or row.get("mode", "chain_hop")
     initiator = row["initiator_worker"]
     if initiator not in endpoint_by_worker:
         raise KeyError(f"Unknown initiator_worker={initiator!r}")
@@ -264,7 +273,8 @@ async def main_async():
     for index, row in enumerate(rows, start=1):
         print(
             f"[{index}/{len(rows)}] {row['query_id']} "
-            f"mode={row.get('mode')} initiator={row['initiator_worker']}"
+            f"mode={args.mode or row.get('mode', 'chain_hop')} "
+            f"initiator={row['initiator_worker']}"
         )
         await dispatch_row(row, endpoint_by_worker, args, output_path)
         if args.delay_seconds > 0:

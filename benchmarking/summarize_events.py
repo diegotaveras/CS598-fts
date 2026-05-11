@@ -94,6 +94,64 @@ def query_started_event(events):
     return starts[0] if starts else None
 
 
+def percentile(values: list[float], pct: float):
+    if not values:
+        return None
+    sorted_values = sorted(values)
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    rank = (len(sorted_values) - 1) * pct
+    lower = int(rank)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    weight = rank - lower
+    return sorted_values[lower] * (1 - weight) + sorted_values[upper] * weight
+
+
+def pageindex_call_latencies(events: list[dict]):
+    pending = defaultdict(list)
+    latencies = []
+    for event in events:
+        event_name = event.get("event")
+        if event_name not in {
+            "pageindex_retrieval_started",
+            "pageindex_retrieval_completed",
+            "pageindex_retrieval_failed",
+        }:
+            continue
+
+        key = (
+            event.get("worker_id", ""),
+            event.get("retrieval_reason", ""),
+            tuple(event.get("doc_ids") or []),
+        )
+        timestamp = event_time(event)
+        if timestamp is None:
+            continue
+
+        if event_name == "pageindex_retrieval_started":
+            pending[key].append(event)
+            continue
+
+        started = pending[key].pop(0) if pending[key] else None
+        start_time = event_time(started)
+        if start_time is None:
+            continue
+        latency = timestamp - start_time
+        if latency < 0:
+            continue
+        latencies.append(
+            {
+                "worker_id": event.get("worker_id", ""),
+                "retrieval_reason": event.get("retrieval_reason", ""),
+                "doc_ids": list(event.get("doc_ids") or []),
+                "status": "failed" if event_name == "pageindex_retrieval_failed" else "completed",
+                "evidence_count": event.get("evidence_count"),
+                "latency_seconds": latency,
+            }
+        )
+    return latencies
+
+
 def summarize_query(row: dict, events: list[dict]):
     route_events = [event for event in events if event.get("event") == "route_received"]
     pageindex_started = [
@@ -115,6 +173,12 @@ def summarize_query(row: dict, events: list[dict]):
     evidence_count = 0
     if evidence_received:
         evidence_count = max(event.get("total_evidence_count", 0) for event in evidence_received)
+    pageindex_latencies = pageindex_call_latencies(events)
+    pageindex_latency_values = [
+        item["latency_seconds"]
+        for item in pageindex_latencies
+        if item.get("latency_seconds") is not None
+    ]
     answer = final.get("answer", "") if final else ""
     not_found = bool(final.get("not_found")) if final else False
     final_failed = final is not None and final.get("event") == "final_answer_failed"
@@ -142,6 +206,20 @@ def summarize_query(row: dict, events: list[dict]):
         "max_hop": max(hops) if hops else None,
         "source_reached": source_worker in nodes_contacted,
         "pageindex_calls": len(pageindex_started),
+        "pageindex_latency_seconds_total": (
+            sum(pageindex_latency_values)
+            if pageindex_latency_values else 0.0
+        ),
+        "pageindex_latency_seconds_max": (
+            max(pageindex_latency_values)
+            if pageindex_latency_values else None
+        ),
+        "pageindex_latency_seconds_avg": (
+            sum(pageindex_latency_values) / len(pageindex_latency_values)
+            if pageindex_latency_values else None
+        ),
+        "pageindex_latency_count": len(pageindex_latency_values),
+        "pageindex_latencies": pageindex_latencies,
         "evidence_count": evidence_count,
         "retrieval_success": evidence_count > 0,
         "not_found": not_found,
@@ -175,6 +253,10 @@ def write_csv(path: Path, rows: list[dict]):
         "max_hop",
         "source_reached",
         "pageindex_calls",
+        "pageindex_latency_seconds_total",
+        "pageindex_latency_seconds_max",
+        "pageindex_latency_seconds_avg",
+        "pageindex_latency_count",
         "evidence_count",
         "retrieval_success",
         "not_found",
@@ -222,6 +304,17 @@ def aggregate(rows: list[dict]):
             for row in finalized
             if row["latency_seconds"] is not None
         ]
+        pageindex_latencies = [
+            latency["latency_seconds"]
+            for row in mode_rows
+            for latency in row.get("pageindex_latencies", [])
+            if latency.get("latency_seconds") is not None
+        ]
+        pageindex_attempt_totals = [
+            row["pageindex_latency_seconds_total"]
+            for row in mode_rows
+            if row.get("pageindex_latency_count", 0) > 0
+        ]
         mode_logical = [
             row for row in best_of_k if row["mode"] == mode
         ]
@@ -240,6 +333,17 @@ def aggregate(rows: list[dict]):
             "avg_pageindex_calls": (
                 sum(row["pageindex_calls"] for row in mode_rows) / len(mode_rows)
                 if mode_rows else 0.0
+            ),
+            "pageindex_latency_call_count": len(pageindex_latencies),
+            "avg_pageindex_latency_seconds": (
+                sum(pageindex_latencies) / len(pageindex_latencies)
+                if pageindex_latencies else None
+            ),
+            "p50_pageindex_latency_seconds": percentile(pageindex_latencies, 0.50),
+            "p95_pageindex_latency_seconds": percentile(pageindex_latencies, 0.95),
+            "avg_pageindex_latency_seconds_per_attempt": (
+                sum(pageindex_attempt_totals) / len(pageindex_attempt_totals)
+                if pageindex_attempt_totals else None
             ),
             "avg_latency_seconds": (
                 sum(latencies) / len(latencies)

@@ -1,0 +1,576 @@
+{
+  "by_dataset_source": {
+    "financebench": {
+      "best_embedding_counts": {
+        "pageindex_depth_weighted_avg": 1
+      },
+      "best_embedding_rates": {
+        "pageindex_depth_weighted_avg": 1.0
+      },
+      "pageindex_all_nodes_minus_top_level_root": {
+        "avg": 0.07976649853927953,
+        "count": 1,
+        "max": 0.07976649853927953,
+        "median": 0.07976649853927953,
+        "min": 0.07976649853927953,
+        "std": 0.0
+      },
+      "pageindex_depth_weighted_minus_all_nodes": {
+        "avg": 2.6042804001535913e-05,
+        "count": 1,
+        "max": 2.6042804001535913e-05,
+        "median": 2.6042804001535913e-05,
+        "min": 2.6042804001535913e-05,
+        "std": 0.0
+      },
+      "pageindex_depth_weighted_minus_whole": {
+        "avg": 0.023888295169668616,
+        "count": 1,
+        "max": 0.023888295169668616,
+        "median": 0.023888295169668616,
+        "min": 0.023888295169668616,
+        "std": 0.0
+      },
+      "pageindex_minus_whole": {
+        "avg": 0.02386225236566708,
+        "count": 1,
+        "max": 0.02386225236566708,
+        "median": 0.02386225236566708,
+        "min": 0.02386225236566708,
+        "std": 0.0
+      },
+      "pageindex_top_level_root_minus_whole": {
+        "avg": -0.05590424617361245,
+        "count": 1,
+        "max": -0.05590424617361245,
+        "median": -0.05590424617361245,
+        "min": -0.05590424617361245,
+        "std": 0.0
+      },
+      "pageindex_win_rate": 1.0,
+      "query_to_pageindex_avg_cosine": {
+        "avg": 0.8490594704710189,
+        "count": 1,
+        "max": 0.8490594704710189,
+        "median": 0.8490594704710189,
+        "min": 0.8490594704710189,
+        "std": 0.0
+      },
+      "query_to_pageindex_depth_weighted_avg_cosine": {
+        "avg": 0.8490855132750205,
+        "count": 1,
+        "max": 0.8490855132750205,
+        "median": 0.8490855132750205,
+        "min": 0.8490855132750205,
+        "std": 0.0
+      },
+      "query_to_pageindex_top_level_root_avg_cosine": {
+        "avg": 0.7692929719317394,
+        "count": 1,
+        "max": 0.7692929719317394,
+        "median": 0.7692929719317394,
+        "min": 0.7692929719317394,
+        "std": 0.0
+      },
+      "query_to_whole_doc_cosine": {
+        "avg": 0.8251972181053518,
+        "count": 1,
+        "max": 0.8251972181053518,
+        "median": 0.8251972181053518,
+        "min": 0.8251972181053518,
+        "std": 0.0
+      },
+      "question_count": 1,
+      "tie_rate": 0.0,
+      "whole_doc_win_rate": 0.0
+    }
+  },
+  "by_document": {
+    "CORNING_2021_10K": {
+      "best_embedding_counts": {
+        "pageindex_depth_weighted_avg": 1
+      },
+      "best_embedding_rates": {
+        "pageindex_depth_weighted_avg": 1.0
+      },
+      "pageindex_all_nodes_minus_top_level_root": {
+        "avg": 0.07976649853927953,
+        "count": 1,
+        "max": 0.07976649853927953,
+        "median": 0.07976649853927953,
+        "min": 0.07976649853927953,
+        "std": 0.0
+      },
+      "pageindex_depth_weighted_minus_all_nodes": {
+        "avg": 2.6042804001535913e-05,
+        "count": 1,
+        "max": 2.6042804001535913e-05,
+        "median": 2.6042804001535913e-05,
+        "min": 2.6042804001535913e-05,
+        "std": 0.0
+      },
+      "pageindex_depth_weighted_minus_whole": {
+        "avg": 0.023888295169668616,
+        "count": 1,
+        "max": 0.023888295169668616,
+        "median": 0.023888295169668616,
+        "min": 0.023888295169668616,
+        "std": 0.0
+      },
+      "pageindex_minus_whole": {
+        "avg": 0.02386225236566708,
+        "count": 1,
+        "max": 0.02386225236566708,
+        "median": 0.02386225236566708,
+        "min": 0.02386225236566708,
+        "std": 0.0
+      },
+      "pageindex_top_level_root_minus_whole": {
+        "avg": -0.05590424617361245,
+        "count": 1,
+        "max": -0.05590424617361245,
+        "median": -0.05590424617361245,
+        "min": -0.05590424617361245,
+        "std": 0.0
+      },
+      "pageindex_win_rate": 1.0,
+      "query_to_pageindex_avg_cosine": {
+        "avg": 0.8490594704710189,
+        "count": 1,
+        "max": 0.8490594704710189,
+        "median": 0.8490594704710189,
+        "min": 0.8490594704710189,
+        "std": 0.0
+      },
+      "query_to_pageindex_depth_weighted_avg_cosine": {
+        "avg": 0.8490855132750205,
+        "count": 1,
+        "max": 0.8490855132750205,
+        "median": 0.8490855132750205,
+        "min": 0.8490855132750205,
+        "std": 0.0
+      },
+      "query_to_pageindex_top_level_root_avg_cosine": {
+        "avg": 0.7692929719317394,
+        "count": 1,
+        "max": 0.7692929719317394,
+        "median": 0.7692929719317394,
+        "min": 0.7692929719317394,
+        "std": 0.0
+      },
+      "query_to_whole_doc_cosine": {
+        "avg": 0.8251972181053518,
+        "count": 1,
+        "max": 0.8251972181053518,
+        "median": 0.8251972181053518,
+        "min": 0.8251972181053518,
+        "std": 0.0
+      },
+      "question_count": 1,
+      "tie_rate": 0.0,
+      "whole_doc_win_rate": 0.0
+    }
+  },
+  "by_topic": {
+    "financebench": {
+      "best_embedding_counts": {
+        "pageindex_depth_weighted_avg": 1
+      },
+      "best_embedding_rates": {
+        "pageindex_depth_weighted_avg": 1.0
+      },
+      "pageindex_all_nodes_minus_top_level_root": {
+        "avg": 0.07976649853927953,
+        "count": 1,
+        "max": 0.07976649853927953,
+        "median": 0.07976649853927953,
+        "min": 0.07976649853927953,
+        "std": 0.0
+      },
+      "pageindex_depth_weighted_minus_all_nodes": {
+        "avg": 2.6042804001535913e-05,
+        "count": 1,
+        "max": 2.6042804001535913e-05,
+        "median": 2.6042804001535913e-05,
+        "min": 2.6042804001535913e-05,
+        "std": 0.0
+      },
+      "pageindex_depth_weighted_minus_whole": {
+        "avg": 0.023888295169668616,
+        "count": 1,
+        "max": 0.023888295169668616,
+        "median": 0.023888295169668616,
+        "min": 0.023888295169668616,
+        "std": 0.0
+      },
+      "pageindex_minus_whole": {
+        "avg": 0.02386225236566708,
+        "count": 1,
+        "max": 0.02386225236566708,
+        "median": 0.02386225236566708,
+        "min": 0.02386225236566708,
+        "std": 0.0
+      },
+      "pageindex_top_level_root_minus_whole": {
+        "avg": -0.05590424617361245,
+        "count": 1,
+        "max": -0.05590424617361245,
+        "median": -0.05590424617361245,
+        "min": -0.05590424617361245,
+        "std": 0.0
+      },
+      "pageindex_win_rate": 1.0,
+      "query_to_pageindex_avg_cosine": {
+        "avg": 0.8490594704710189,
+        "count": 1,
+        "max": 0.8490594704710189,
+        "median": 0.8490594704710189,
+        "min": 0.8490594704710189,
+        "std": 0.0
+      },
+      "query_to_pageindex_depth_weighted_avg_cosine": {
+        "avg": 0.8490855132750205,
+        "count": 1,
+        "max": 0.8490855132750205,
+        "median": 0.8490855132750205,
+        "min": 0.8490855132750205,
+        "std": 0.0
+      },
+      "query_to_pageindex_top_level_root_avg_cosine": {
+        "avg": 0.7692929719317394,
+        "count": 1,
+        "max": 0.7692929719317394,
+        "median": 0.7692929719317394,
+        "min": 0.7692929719317394,
+        "std": 0.0
+      },
+      "query_to_whole_doc_cosine": {
+        "avg": 0.8251972181053518,
+        "count": 1,
+        "max": 0.8251972181053518,
+        "median": 0.8251972181053518,
+        "min": 0.8251972181053518,
+        "std": 0.0
+      },
+      "question_count": 1,
+      "tie_rate": 0.0,
+      "whole_doc_win_rate": 0.0
+    }
+  },
+  "depth_weight_base": 2.0,
+  "failure_count": 0,
+  "failures": [],
+  "min_pages": 50,
+  "overall": {
+    "best_embedding_counts": {
+      "pageindex_depth_weighted_avg": 1
+    },
+    "best_embedding_rates": {
+      "pageindex_depth_weighted_avg": 1.0
+    },
+    "pageindex_all_nodes_minus_top_level_root": {
+      "avg": 0.07976649853927953,
+      "count": 1,
+      "max": 0.07976649853927953,
+      "median": 0.07976649853927953,
+      "min": 0.07976649853927953,
+      "std": 0.0
+    },
+    "pageindex_depth_weighted_minus_all_nodes": {
+      "avg": 2.6042804001535913e-05,
+      "count": 1,
+      "max": 2.6042804001535913e-05,
+      "median": 2.6042804001535913e-05,
+      "min": 2.6042804001535913e-05,
+      "std": 0.0
+    },
+    "pageindex_depth_weighted_minus_whole": {
+      "avg": 0.023888295169668616,
+      "count": 1,
+      "max": 0.023888295169668616,
+      "median": 0.023888295169668616,
+      "min": 0.023888295169668616,
+      "std": 0.0
+    },
+    "pageindex_minus_whole": {
+      "avg": 0.02386225236566708,
+      "count": 1,
+      "max": 0.02386225236566708,
+      "median": 0.02386225236566708,
+      "min": 0.02386225236566708,
+      "std": 0.0
+    },
+    "pageindex_top_level_root_minus_whole": {
+      "avg": -0.05590424617361245,
+      "count": 1,
+      "max": -0.05590424617361245,
+      "median": -0.05590424617361245,
+      "min": -0.05590424617361245,
+      "std": 0.0
+    },
+    "pageindex_win_rate": 1.0,
+    "query_to_pageindex_avg_cosine": {
+      "avg": 0.8490594704710189,
+      "count": 1,
+      "max": 0.8490594704710189,
+      "median": 0.8490594704710189,
+      "min": 0.8490594704710189,
+      "std": 0.0
+    },
+    "query_to_pageindex_depth_weighted_avg_cosine": {
+      "avg": 0.8490855132750205,
+      "count": 1,
+      "max": 0.8490855132750205,
+      "median": 0.8490855132750205,
+      "min": 0.8490855132750205,
+      "std": 0.0
+    },
+    "query_to_pageindex_top_level_root_avg_cosine": {
+      "avg": 0.7692929719317394,
+      "count": 1,
+      "max": 0.7692929719317394,
+      "median": 0.7692929719317394,
+      "min": 0.7692929719317394,
+      "std": 0.0
+    },
+    "query_to_whole_doc_cosine": {
+      "avg": 0.8251972181053518,
+      "count": 1,
+      "max": 0.8251972181053518,
+      "median": 0.8251972181053518,
+      "min": 0.8251972181053518,
+      "std": 0.0
+    },
+    "question_count": 1,
+    "tie_rate": 0.0,
+    "whole_doc_win_rate": 0.0
+  },
+  "pageindex_doc_count": 53,
+  "pageindex_document_source": "pageindex-docs",
+  "processed_doc_count": 1,
+  "question_count": 1,
+  "skipped_min_pages": [
+    {
+      "min_pages": 50,
+      "page_count": 9,
+      "pdf_name": "AMCOR_2022_8K_dated-2022-07-01.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "FOOTLOCKER_2022_8K_dated-2022-05-20.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 5,
+      "pdf_name": "PEPSICO_2023_8K_dated-2023-05-05.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "bqektocj.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "cnysnjlb.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "coxotzft.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "cpwnauqv.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "ctpkzdhm.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "czplgubm.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "dpddgmek.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "efwdgrkh.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "efwdgrkh_1.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "fedhtqla.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "fmemilkk.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "gjxpphdi.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "gkvmripm.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "hlhkurnf.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "ieaalfsp.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "kdjuvvhe.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "lqzpubhr.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "mlqtjntb.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "mnovuvpz.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "mnovuvpz_1.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "nfpdibes.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "npclxwgu.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "npygpdnh.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "qsuyamen.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "rgcyyrhb.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "sokjefpf.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "sosnagnr.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "tmjjqhwj.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "tnhsojfg.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "tvwfwgad.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "ufkzbdbg.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "vmeykjdg.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "wclueecr.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "xdlihuno.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "xuheqple.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "xzpmxgfn.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 4,
+      "pdf_name": "zxdlsong.pdf"
+    },
+    {
+      "min_pages": 50,
+      "page_count": 3,
+      "pdf_name": "zxguquid.pdf"
+    }
+  ],
+  "skipped_min_pages_count": 41,
+  "skipped_no_pdf": [],
+  "skipped_no_pdf_count": 0,
+  "skipped_no_rows": [
+    "INTEL_2022Q4_EARNINGS.pdf",
+    "INTEL_2022Q4_EARNINGS_1.pdf",
+    "LOCKHEEDMARTIN_2023Q1_10Q.pdf",
+    "MCDONALDS_8K_dated-2023-01-06.pdf",
+    "PG_E_2023_EARNINGS-dated-2023-07-27.pdf",
+    "PG_E_2023_EARNINGS_dated-2023-05-31.pdf",
+    "SALESFORCE_2021_8K_dated-2021-07-21.pdf",
+    "SALESFORCE_2021_8K_dated-2021-07-21_1.pdf",
+    "ULTABEAUTY_2023Q1_EARNINGS.pdf",
+    "_10-K-2025-As-Filed.pdf",
+    "_10-K-2025-As-Filed_1.pdf"
+  ],
+  "skipped_no_rows_count": 11
+}

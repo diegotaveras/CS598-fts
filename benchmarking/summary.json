@@ -1,0 +1,20 @@
+{
+  "attempt_rows": 216,
+  "logical_queries": 108,
+  "modes": {
+    "chain_hop": {
+      "attempt_rows": 216,
+      "avg_latency_seconds": 64.03331939404718,
+      "avg_nodes_contacted": 2.800925925925926,
+      "avg_pageindex_calls": 2.800925925925926,
+      "avg_pageindex_latency_seconds": 5.272715586857305,
+      "avg_pageindex_latency_seconds_per_attempt": 14.768485787262357,
+      "best_of_k_success_rate": 0.3611111111111111,
+      "finalized_rows": 216,
+      "p50_pageindex_latency_seconds": 3.461719069018727,
+      "p95_pageindex_latency_seconds": 10.51438372079283,
+      "pageindex_latency_call_count": 605,
+      "retrieval_success_rate": 0.3333333333333333
+    }
+  }
+}
