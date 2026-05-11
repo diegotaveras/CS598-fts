@@ -18,6 +18,7 @@ CONTAINER_PORT="${RAG_CONTAINER_PORT:-9100}"
 HOST_HF_CACHE="${RAG_HOST_HF_CACHE:-$REPO_ROOT/hf_cache/$NODE_ID}"
 BENCHMARK_EVENTS_PATH="${RAG_BENCHMARK_EVENTS_PATH:-/app/benchmarking/events/$NODE_ID.jsonl}"
 DETACH="${RAG_DOCKER_DETACH:-1}"
+BUILD_IMAGE="${RAG_BUILD_IMAGE:-1}"
 
 if [ ! -f "$CONFIG" ]; then
   echo "missing VM worker config: $CONFIG" >&2
@@ -89,7 +90,11 @@ fi
 
 mkdir -p "$HOST_DOC_DIR" "$HOST_HF_CACHE"
 
-docker build -t "$IMAGE" "$REPO_ROOT"
+if [ "$BUILD_IMAGE" = "1" ]; then
+  docker build -t "$IMAGE" "$REPO_ROOT"
+else
+  echo "skipping docker build for $IMAGE because RAG_BUILD_IMAGE=$BUILD_IMAGE"
+fi
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
 DOCKER_ENV_ARGS="--env-file $ENV_OUT"

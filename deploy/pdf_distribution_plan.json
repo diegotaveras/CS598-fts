@@ -1,0 +1,466 @@
+[
+  {
+    "addr": "c220g5-110429.wisc.cloudlab.us",
+    "node_id": "node1",
+    "pdf_count": 2,
+    "pdfs": [
+      {
+        "category": "local_arts_and_culture",
+        "path": "pdfs/local_arts_and_culture/repliqa_0/mlqtjntb.pdf"
+      },
+      {
+        "category": "local_arts_and_culture",
+        "path": "pdfs/local_arts_and_culture/repliqa_0/npygpdnh.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node1",
+    "remote_node_id": "node1",
+    "vm_id": "vm1"
+  },
+  {
+    "addr": "c220g5-110429.wisc.cloudlab.us",
+    "node_id": "node2",
+    "pdf_count": 2,
+    "pdfs": [
+      {
+        "category": "local_arts_and_culture",
+        "path": "pdfs/local_arts_and_culture/repliqa_0/qsuyamen.pdf"
+      },
+      {
+        "category": "local_arts_and_culture",
+        "path": "pdfs/local_arts_and_culture/repliqa_0/sokjefpf.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node2",
+    "remote_node_id": "node2",
+    "vm_id": "vm1"
+  },
+  {
+    "addr": "c220g5-110429.wisc.cloudlab.us",
+    "node_id": "node3",
+    "pdf_count": 2,
+    "pdfs": [
+      {
+        "category": "local_education_systems",
+        "path": "pdfs/local_education_systems/repliqa_0/gkvmripm.pdf"
+      },
+      {
+        "category": "local_education_systems",
+        "path": "pdfs/local_education_systems/repliqa_0/ufkzbdbg.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node3",
+    "remote_node_id": "node3",
+    "vm_id": "vm1"
+  },
+  {
+    "addr": "c220g5-110429.wisc.cloudlab.us",
+    "node_id": "node4",
+    "pdf_count": 2,
+    "pdfs": [
+      {
+        "category": "local_education_systems",
+        "path": "pdfs/local_education_systems/repliqa_0/xdlihuno.pdf"
+      },
+      {
+        "category": "local_education_systems",
+        "path": "pdfs/local_education_systems/repliqa_0/xuheqple.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node4",
+    "remote_node_id": "node4",
+    "vm_id": "vm1"
+  },
+  {
+    "addr": "c220g5-120125.wisc.cloudlab.us",
+    "node_id": "node5",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_environmental_issues",
+        "path": "pdfs/local_environmental_issues/repliqa_0/efwdgrkh.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node1",
+    "remote_node_id": "node1",
+    "vm_id": "vm2"
+  },
+  {
+    "addr": "c220g5-120125.wisc.cloudlab.us",
+    "node_id": "node6",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_environmental_issues",
+        "path": "pdfs/local_environmental_issues/repliqa_0/mnovuvpz.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node2",
+    "remote_node_id": "node2",
+    "vm_id": "vm2"
+  },
+  {
+    "addr": "c220g5-120125.wisc.cloudlab.us",
+    "node_id": "node7",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_environmental_issues",
+        "path": "pdfs/local_environmental_issues/repliqa_0/sosnagnr.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node3",
+    "remote_node_id": "node3",
+    "vm_id": "vm2"
+  },
+  {
+    "addr": "c220g5-120125.wisc.cloudlab.us",
+    "node_id": "node8",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_environmental_issues",
+        "path": "pdfs/local_environmental_issues/repliqa_0/wclueecr.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node4",
+    "remote_node_id": "node4",
+    "vm_id": "vm2"
+  },
+  {
+    "addr": "c220g5-110430.wisc.cloudlab.us",
+    "node_id": "node9",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_health_and_wellness",
+        "path": "pdfs/local_health_and_wellness/repliqa_0/fedhtqla.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node1",
+    "remote_node_id": "node1",
+    "vm_id": "vm3"
+  },
+  {
+    "addr": "c220g5-110430.wisc.cloudlab.us",
+    "node_id": "node10",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_health_and_wellness",
+        "path": "pdfs/local_health_and_wellness/repliqa_0/gjxpphdi.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node2",
+    "remote_node_id": "node2",
+    "vm_id": "vm3"
+  },
+  {
+    "addr": "c220g5-110430.wisc.cloudlab.us",
+    "node_id": "node11",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_health_and_wellness",
+        "path": "pdfs/local_health_and_wellness/repliqa_0/kdjuvvhe.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node3",
+    "remote_node_id": "node3",
+    "vm_id": "vm3"
+  },
+  {
+    "addr": "c220g5-110430.wisc.cloudlab.us",
+    "node_id": "node12",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_health_and_wellness",
+        "path": "pdfs/local_health_and_wellness/repliqa_0/xzpmxgfn.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node4",
+    "remote_node_id": "node4",
+    "vm_id": "vm3"
+  },
+  {
+    "addr": "c220g5-110404.wisc.cloudlab.us",
+    "node_id": "node13",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_news",
+        "path": "pdfs/local_news/repliqa_0/ctpkzdhm.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node1",
+    "remote_node_id": "node1",
+    "vm_id": "vm4"
+  },
+  {
+    "addr": "c220g5-110404.wisc.cloudlab.us",
+    "node_id": "node14",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_news",
+        "path": "pdfs/local_news/repliqa_0/ieaalfsp.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node2",
+    "remote_node_id": "node2",
+    "vm_id": "vm4"
+  },
+  {
+    "addr": "c220g5-110404.wisc.cloudlab.us",
+    "node_id": "node15",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_news",
+        "path": "pdfs/local_news/repliqa_0/tmjjqhwj.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node3",
+    "remote_node_id": "node3",
+    "vm_id": "vm4"
+  },
+  {
+    "addr": "c220g5-110404.wisc.cloudlab.us",
+    "node_id": "node16",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_news",
+        "path": "pdfs/local_news/repliqa_0/zxdlsong.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node4",
+    "remote_node_id": "node4",
+    "vm_id": "vm4"
+  },
+  {
+    "addr": "c220g5-110418.wisc.cloudlab.us",
+    "node_id": "node17",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_sports_and_activities",
+        "path": "pdfs/local_sports_and_activities/repliqa_0/bqektocj.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node1",
+    "remote_node_id": "node1",
+    "vm_id": "vm5"
+  },
+  {
+    "addr": "c220g5-110418.wisc.cloudlab.us",
+    "node_id": "node18",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_sports_and_activities",
+        "path": "pdfs/local_sports_and_activities/repliqa_0/cpwnauqv.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node2",
+    "remote_node_id": "node2",
+    "vm_id": "vm5"
+  },
+  {
+    "addr": "c220g5-110418.wisc.cloudlab.us",
+    "node_id": "node19",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_sports_and_activities",
+        "path": "pdfs/local_sports_and_activities/repliqa_0/czplgubm.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node3",
+    "remote_node_id": "node3",
+    "vm_id": "vm5"
+  },
+  {
+    "addr": "c220g5-110418.wisc.cloudlab.us",
+    "node_id": "node20",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_sports_and_activities",
+        "path": "pdfs/local_sports_and_activities/repliqa_0/nfpdibes.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node4",
+    "remote_node_id": "node4",
+    "vm_id": "vm5"
+  },
+  {
+    "addr": "c220g5-120127.wisc.cloudlab.us",
+    "node_id": "node21",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_technology_and_innovation",
+        "path": "pdfs/local_technology_and_innovation/repliqa_0/dpddgmek.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node1",
+    "remote_node_id": "node1",
+    "vm_id": "vm6"
+  },
+  {
+    "addr": "c220g5-120127.wisc.cloudlab.us",
+    "node_id": "node22",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_technology_and_innovation",
+        "path": "pdfs/local_technology_and_innovation/repliqa_0/fmemilkk.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node2",
+    "remote_node_id": "node2",
+    "vm_id": "vm6"
+  },
+  {
+    "addr": "c220g5-120127.wisc.cloudlab.us",
+    "node_id": "node23",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_technology_and_innovation",
+        "path": "pdfs/local_technology_and_innovation/repliqa_0/vmeykjdg.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node3",
+    "remote_node_id": "node3",
+    "vm_id": "vm6"
+  },
+  {
+    "addr": "c220g5-120127.wisc.cloudlab.us",
+    "node_id": "node24",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "local_technology_and_innovation",
+        "path": "pdfs/local_technology_and_innovation/repliqa_0/zxguquid.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node4",
+    "remote_node_id": "node4",
+    "vm_id": "vm6"
+  },
+  {
+    "addr": "c220g5-110421.wisc.cloudlab.us",
+    "node_id": "node25",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "regional_cuisine_and_recipes",
+        "path": "pdfs/regional_cuisine_and_recipes/repliqa_0/npclxwgu.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node1",
+    "remote_node_id": "node1",
+    "vm_id": "vm7"
+  },
+  {
+    "addr": "c220g5-110421.wisc.cloudlab.us",
+    "node_id": "node26",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "regional_cuisine_and_recipes",
+        "path": "pdfs/regional_cuisine_and_recipes/repliqa_0/rgcyyrhb.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node2",
+    "remote_node_id": "node2",
+    "vm_id": "vm7"
+  },
+  {
+    "addr": "c220g5-110421.wisc.cloudlab.us",
+    "node_id": "node27",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "regional_cuisine_and_recipes",
+        "path": "pdfs/regional_cuisine_and_recipes/repliqa_0/tnhsojfg.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node3",
+    "remote_node_id": "node3",
+    "vm_id": "vm7"
+  },
+  {
+    "addr": "c220g5-110421.wisc.cloudlab.us",
+    "node_id": "node28",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "regional_cuisine_and_recipes",
+        "path": "pdfs/regional_cuisine_and_recipes/repliqa_0/tvwfwgad.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node4",
+    "remote_node_id": "node4",
+    "vm_id": "vm7"
+  },
+  {
+    "addr": "c220g5-110401.wisc.cloudlab.us",
+    "node_id": "node29",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "regional_folklore_and_myths",
+        "path": "pdfs/regional_folklore_and_myths/repliqa_0/cnysnjlb.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node1",
+    "remote_node_id": "node1",
+    "vm_id": "vm8"
+  },
+  {
+    "addr": "c220g5-110401.wisc.cloudlab.us",
+    "node_id": "node30",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "regional_folklore_and_myths",
+        "path": "pdfs/regional_folklore_and_myths/repliqa_0/coxotzft.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node2",
+    "remote_node_id": "node2",
+    "vm_id": "vm8"
+  },
+  {
+    "addr": "c220g5-110401.wisc.cloudlab.us",
+    "node_id": "node31",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "regional_folklore_and_myths",
+        "path": "pdfs/regional_folklore_and_myths/repliqa_0/hlhkurnf.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node3",
+    "remote_node_id": "node3",
+    "vm_id": "vm8"
+  },
+  {
+    "addr": "c220g5-110401.wisc.cloudlab.us",
+    "node_id": "node32",
+    "pdf_count": 1,
+    "pdfs": [
+      {
+        "category": "regional_folklore_and_myths",
+        "path": "pdfs/regional_folklore_and_myths/repliqa_0/lqzpubhr.pdf"
+      }
+    ],
+    "remote_dir": "~/CS598-fts/rag_docs/node4",
+    "remote_node_id": "node4",
+    "vm_id": "vm8"
+  }
+]
