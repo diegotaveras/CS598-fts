@@ -7,6 +7,7 @@ import numpy as np
 
 from rag.bert_embedder import BertEmbedder, DEFAULT_BERT_MODEL, cosine_similarity
 from rag.document_store import read_pdf_text
+from rag.keyword_extractor import KeyBertKeywordExtractor, KeywordExtractionConfig
 
 
 def parse_args():
@@ -57,6 +58,14 @@ def parse_args():
         ),
     )
     parser.add_argument("--chunk-chars", type=int, default=3000)
+    parser.add_argument(
+        "--extract-keywords",
+        action="store_true",
+        help=(
+            "Extract KeyBERT keywords from top-level PageIndex root nodes and "
+            "compare the average keyword embedding to --query."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -131,6 +140,17 @@ def iter_pageindex_nodes(value):
             yield from iter_pageindex_nodes(child)
 
 
+def top_level_pageindex_nodes(value):
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        result = value.get("result")
+        if isinstance(result, list):
+            return [item for item in result if isinstance(item, dict)]
+        return [value]
+    return []
+
+
 def pageindex_node_text(node):
     parts = []
     title = node.get("title") or node.get("name")
@@ -168,6 +188,30 @@ def embed_texts_average(embedder, texts, max_length):
     if not embeddings:
         raise ValueError("No non-empty texts to embed")
     return average_embeddings(embeddings)
+
+
+def extract_top_level_root_keywords(embedder, structure):
+    config = KeywordExtractionConfig.from_env()
+    if not config.enabled:
+        return []
+    extractor = KeyBertKeywordExtractor(config, embedder)
+    keywords_by_text = {}
+    for node in top_level_pageindex_nodes(structure):
+        text = pageindex_node_text(node)
+        if not text:
+            continue
+        for item in extractor.extract_keywords(text):
+            keyword = item["keyword"]
+            if keyword not in keywords_by_text or item["score"] > keywords_by_text[keyword]:
+                keywords_by_text[keyword] = item["score"]
+    return [
+        {"keyword": keyword, "score": score}
+        for keyword, score in sorted(
+            keywords_by_text.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+    ]
 
 
 def main():
@@ -223,6 +267,16 @@ def main():
         node_texts,
         max_length=args.max_length,
     )
+    top_level_keywords = []
+    top_level_keyword_embedding = None
+    if args.extract_keywords:
+        top_level_keywords = extract_top_level_root_keywords(embedder, structure)
+    if args.extract_keywords and top_level_keywords:
+        top_level_keyword_embedding = embed_texts_average(
+            embedder,
+            [item["keyword"] for item in top_level_keywords],
+            max_length=args.max_length,
+        )
 
     score = cosine_similarity(whole_embedding, pageindex_embedding)
     query_scores = {}
@@ -236,6 +290,10 @@ def main():
             "query_to_whole_doc_cosine": cosine_similarity(query_embedding, whole_embedding),
             "query_to_pageindex_avg_cosine": cosine_similarity(query_embedding, pageindex_embedding),
         }
+        if top_level_keyword_embedding is not None:
+            query_scores["query_to_top_level_root_keywords_avg_cosine"] = (
+                cosine_similarity(query_embedding, top_level_keyword_embedding)
+            )
 
     print(json.dumps(
         {
@@ -247,6 +305,8 @@ def main():
             "whole_doc_mode": args.whole_doc_mode,
             "whole_doc_units": whole_units,
             "pageindex_node_count": len(node_texts),
+            "top_level_root_count": len(top_level_pageindex_nodes(structure)),
+            "top_level_root_keywords": top_level_keywords,
             "cosine_similarity": score,
             **query_scores,
         },

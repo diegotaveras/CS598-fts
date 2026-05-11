@@ -134,7 +134,7 @@ PAGEINDEX_RETRIEVAL_DEBUG_CHARS = int(
     os.getenv("RAG_PAGEINDEX_RETRIEVAL_DEBUG_CHARS", "4000")
 )
 COORDINATOR_SUMMARY_DELAY_SECONDS = float(
-    os.getenv("RAG_COORDINATOR_SUMMARY_DELAY_SECONDS", "3.0")
+    os.getenv("RAG_COORDINATOR_SUMMARY_DELAY_SECONDS", "30.0")
 )
 COORDINATOR_CONTEXT_MAX_CHARS = int(
     os.getenv("RAG_COORDINATOR_CONTEXT_MAX_CHARS", "16000")
@@ -149,8 +149,17 @@ ROUTING_TREE_EXPECTED_USERS = int(
 )
 ROUTING_TREE_RECORD_LIMIT = int(os.getenv("RAG_ROUTING_TREE_RECORD_LIMIT", "2"))
 ROUTING_TREE_DELTA = float(os.getenv("RAG_ROUTING_TREE_DELTA", "0.0005"))
-ROUTING_TREE_CLOSEST_USERS = int(os.getenv("RAG_ROUTING_TREE_CLOSEST_USERS", "2"))
+ROUTING_TREE_CLOSEST_USERS = int(os.getenv("RAG_ROUTING_TREE_CLOSEST_USERS", "6"))
 ROUTING_TREE_CANDIDATE_USERS = int(os.getenv("RAG_ROUTING_TREE_CANDIDATE_USERS", "0"))
+ROUTING_TREE_KNOWN_USERS_PER_CLONE = int(
+    os.getenv(
+        "RAG_ROUTING_TREE_KNOWN_USERS_PER_CLONE",
+        str(max(ROUTING_TREE_CLOSEST_USERS * 2, ROUTING_TREE_CLOSEST_USERS)),
+    )
+)
+ROUTING_TREE_EXPANSION_ROUNDS = int(
+    os.getenv("RAG_ROUTING_TREE_EXPANSION_ROUNDS", "3")
+)
 ROUTING_MODE = RoutingMode.from_env(os.getenv("RAG_ROUTING_MODE", RoutingMode.JOIN_TREE.value))
 INIT_WORKER_ID = os.getenv("RAG_INIT_WORKER_ID", "node1")
 INIT_ADDR = os.getenv("RAG_INIT_ADDR", "node1:9100")
@@ -185,6 +194,7 @@ BOOTSTRAP_ROUTING_TREE_TIMEOUT_SECONDS = float(
 MULTICAST_RETRY_ATTEMPTS = int(os.getenv("RAG_MULTICAST_RETRY_ATTEMPTS", "6"))
 MULTICAST_RETRY_SECONDS = float(os.getenv("RAG_MULTICAST_RETRY_SECONDS", "5.0"))
 LEASE_DURATION_SECONDS = int(os.getenv("RAG_LEASE_DURATION_SECONDS", "15"))
+LEADER_MONITOR_SECONDS = float(os.getenv("RAG_LEADER_MONITOR_SECONDS", "2.0"))
 # Set RAG_FORCE_LEADER_ID to skip DynamoDB election and statically assign a leader.
 # e.g. RAG_FORCE_LEADER_ID=node1  → node1 is always root; remove var to use DynamoDB election.
 FORCE_LEADER_ID: str | None = os.getenv("RAG_FORCE_LEADER_ID")
@@ -252,6 +262,7 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         self.routing_tree_result = None
         self.routing_tree_built_for_workers = set()
         self.closest_user_entries_by_worker = {}
+        self.known_user_entries_by_worker = {}
         self.joined_tree_users = {}
         self.routing_tree_nodes = {}
         self.routing_tree_inserted_workers = set()
@@ -260,6 +271,79 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         self.assigned_routing_tree_node_id = ""
         self.assigned_routing_tree_custodian_worker_id = ""
         self.assigned_routing_tree_custodian_addr = ""
+
+    def reset_routing_tree_state(self, reason: str, preserve_user_registry: bool = False):
+        own_registration = self.build_user_embedding_registration()
+        own_entry = None
+        if own_registration.embedding:
+            own_entry = self.user_embedding_entry_from_registration(own_registration)
+
+        if not preserve_user_registry:
+            self.user_embedding_registry = {}
+            if own_entry is not None:
+                self.user_embedding_registry[self.worker_id] = own_entry
+
+        self.routing_tree_result = None
+        self.routing_tree_built_for_workers = set()
+        self.closest_user_entries_by_worker = {}
+        self.known_user_entries_by_worker = {}
+        self.joined_tree_users = {}
+        self.routing_tree_nodes = {}
+        self.routing_tree_inserted_workers = set()
+        self.next_routing_tree_node_id = 0
+        self.assigned_routing_tree_node_id = ""
+        self.assigned_routing_tree_custodian_worker_id = ""
+        self.assigned_routing_tree_custodian_addr = ""
+        self.routing_epoch = 0
+        print(
+            f"[rag-worker {self.worker_id}] reset routing-tree state "
+            f"reason={reason} preserve_user_registry={preserve_user_registry}",
+            flush=True,
+        )
+        benchmark_events.emit(
+            "routing_tree_state_reset",
+            reason=reason,
+            preserve_user_registry=preserve_user_registry,
+        )
+
+    async def rebuild_routing_tree_as_leader(self, reason: str):
+        benchmark_events.emit(
+            "routing_tree_rebuild_started",
+            reason=reason,
+        )
+        self.reset_routing_tree_state(reason=reason, preserve_user_registry=False)
+        reply = await self.handle_routing_tree_join(
+            self.build_routing_tree_join_request(),
+            self.routing_tree_root_node_id,
+        )
+        print(
+            f"[rag-worker {self.worker_id}] rebuilt routing-tree root self_join "
+            f"accepted={reply.accepted} joined={reply.joined_count}/"
+            f"{reply.expected_count} epoch={reply.routing_epoch}",
+            flush=True,
+        )
+        benchmark_events.emit(
+            "routing_tree_rebuild_self_joined",
+            reason=reason,
+            accepted=reply.accepted,
+            joined_count=reply.joined_count,
+            expected_count=reply.expected_count,
+            routing_epoch=reply.routing_epoch,
+        )
+
+    def prepare_for_routing_tree_rejoin(self, reason: str, leader_id: str, leader_addr: str):
+        self.reset_routing_tree_state(reason=reason, preserve_user_registry=False)
+        print(
+            f"[rag-worker {self.worker_id}] prepared routing-tree rejoin "
+            f"leader={leader_id}@{leader_addr} reason={reason}",
+            flush=True,
+        )
+        benchmark_events.emit(
+            "routing_tree_rejoin_prepared",
+            reason=reason,
+            leader_id=leader_id,
+            leader_addr=leader_addr,
+        )
 
     async def Ping(self, request, context):
         return rag_pb2.RagPingReply(worker_id=self.worker_id, status="alive")
@@ -507,6 +591,15 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
             f"joined={len(self.joined_tree_users)}/{ROUTING_TREE_EXPECTED_USERS} "
             f"already_joined={already_joined}",
             flush=True,
+        )
+        benchmark_events.emit(
+            "routing_tree_join_accepted",
+            joining_worker_id=request.worker_id,
+            joining_addr=request.advertise_addr,
+            joined_count=len(self.joined_tree_users),
+            expected_count=ROUTING_TREE_EXPECTED_USERS,
+            already_joined=already_joined,
+            tree_node_id=tree_node_id or self.routing_tree_root_node_id,
         )
         if not already_joined:
             assigned_tree_node_id = await self.insert_routing_tree_peer(
@@ -891,15 +984,37 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
 
         self.routing_epoch += 1
         self.routing_tree_built_for_workers = set(self.routing_tree_inserted_workers)
-        self.closest_user_entries_by_worker = self.closest_users_from_routing_tree()
+        (
+            self.known_user_entries_by_worker,
+            self.closest_user_entries_by_worker,
+        ) = self.closest_users_from_routing_tree()
 
         leaf_members = self.routing_tree_leaf_members()
+        closest_counts = {
+            worker_id: len(entries)
+            for worker_id, entries in sorted(self.closest_user_entries_by_worker.items())
+        }
+        known_counts = {
+            worker_id: len(entries)
+            for worker_id, entries in sorted(self.known_user_entries_by_worker.items())
+        }
         print(
             f"[rag-worker {self.worker_id}] refreshed routing-tree metadata "
             f"epoch={self.routing_epoch} joined={len(self.joined_tree_users)} "
             f"leaves={len(leaf_members)} "
-            f"leaf_members={json.dumps(leaf_members, sort_keys=True)}",
+            f"leaf_members={json.dumps(leaf_members, sort_keys=True)} "
+            f"known_counts={json.dumps(known_counts, sort_keys=True)} "
+            f"closest_counts={json.dumps(closest_counts, sort_keys=True)}",
             flush=True,
+        )
+        benchmark_events.emit(
+            "routing_tree_metadata_refreshed",
+            routing_epoch=self.routing_epoch,
+            joined_count=len(self.joined_tree_users),
+            expected_count=ROUTING_TREE_EXPECTED_USERS,
+            leaf_count=len(leaf_members),
+            closest_counts=closest_counts,
+            known_counts=known_counts,
         )
 
     def routing_tree_leaf_members(self):
@@ -910,30 +1025,156 @@ class RagWorkerServicer(rag_pb2_grpc.RagServiceServicer):
         }
 
     def closest_users_from_routing_tree(self):
-        closest_by_worker = {}
-        for node in self.routing_tree_nodes.values():
-            if node.kind != "leaf":
+        worker_ids = sorted(self.joined_tree_users)
+        known_ids_by_worker = {worker_id: set() for worker_id in worker_ids}
+        leaf_members = self.routing_tree_leaf_members()
+
+        for members in leaf_members.values():
+            active_members = [
+                worker_id for worker_id in members if worker_id in self.joined_tree_users
+            ]
+            for worker_id in active_members:
+                ranked_leaf_ids = self.ranked_worker_ids_for_owner(
+                    worker_id,
+                    active_members,
+                    limit=ROUTING_TREE_KNOWN_USERS_PER_CLONE,
+                )
+                known_ids_by_worker[worker_id].update(ranked_leaf_ids)
+
+        # Practical clone/leaf backfill: without clone replication, small leaves can
+        # leave users with only one neighbor, so expansion cannot cross leaf boundaries.
+        for worker_id in worker_ids:
+            if len(known_ids_by_worker[worker_id]) >= ROUTING_TREE_CLOSEST_USERS:
                 continue
-            for worker_id in node.member_worker_ids:
-                owner_entry = self.joined_tree_users.get(worker_id)
-                if owner_entry is None:
+            ranked_global_ids = self.ranked_worker_ids_for_owner(
+                worker_id,
+                worker_ids,
+                limit=ROUTING_TREE_KNOWN_USERS_PER_CLONE,
+            )
+            known_ids_by_worker[worker_id].update(ranked_global_ids)
+
+        closest_ids_by_worker = self.closest_ids_from_known_ids(known_ids_by_worker)
+
+        for round_index in range(ROUTING_TREE_EXPANSION_ROUNDS):
+            additions = 0
+            for worker_id in worker_ids:
+                closest_ids = closest_ids_by_worker.get(worker_id, [])
+                if not closest_ids:
                     continue
-                scored = []
-                owner_embedding = owner_entry["embedding"]
-                for candidate_id in node.member_worker_ids:
-                    if candidate_id == worker_id:
-                        continue
-                    candidate_entry = self.joined_tree_users.get(candidate_id)
-                    if candidate_entry is None:
-                        continue
-                    score = cosine_similarity(owner_embedding, candidate_entry["embedding"])
-                    scored.append((score, candidate_entry))
-                scored.sort(key=lambda item: item[0], reverse=True)
-                closest_by_worker[worker_id] = [
-                    entry
-                    for _, entry in scored[:ROUTING_TREE_CLOSEST_USERS]
+                neighbor_id = closest_ids[
+                    (round_index + self.stable_worker_index(worker_id))
+                    % len(closest_ids)
                 ]
-        return closest_by_worker
+                candidate_pool = (
+                    set(known_ids_by_worker.get(neighbor_id, set()))
+                    | set(closest_ids_by_worker.get(neighbor_id, []))
+                )
+                candidate_pool.discard(worker_id)
+                candidate_pool.difference_update(known_ids_by_worker[worker_id])
+                candidate_pool = {
+                    candidate_id
+                    for candidate_id in candidate_pool
+                    if candidate_id in self.joined_tree_users
+                }
+                if not candidate_pool:
+                    continue
+
+                best_candidate_id = self.best_candidate_for_owner(
+                    worker_id,
+                    sorted(candidate_pool),
+                )
+                if not best_candidate_id:
+                    continue
+
+                best_score = self.user_similarity(worker_id, best_candidate_id)
+                acceptance_score = self.closest_acceptance_score(
+                    worker_id,
+                    closest_ids_by_worker.get(worker_id, []),
+                )
+                if best_score > acceptance_score:
+                    known_ids_by_worker[worker_id].add(best_candidate_id)
+                    additions += 1
+                    closest_ids_by_worker[worker_id] = self.closest_ids_from_known_ids(
+                        {worker_id: known_ids_by_worker[worker_id]}
+                    ).get(worker_id, [])
+
+            print(
+                f"[rag-worker {self.worker_id}] routing closest-users expansion "
+                f"round={round_index + 1}/{ROUTING_TREE_EXPANSION_ROUNDS} "
+                f"additions={additions}",
+                flush=True,
+            )
+            if additions == 0:
+                break
+
+        known_entries_by_worker = {
+            worker_id: [
+                self.joined_tree_users[candidate_id]
+                for candidate_id in self.ranked_worker_ids_for_owner(
+                    worker_id,
+                    sorted(known_ids),
+                    limit=0,
+                )
+            ]
+            for worker_id, known_ids in known_ids_by_worker.items()
+        }
+        closest_entries_by_worker = {
+            worker_id: [
+                self.joined_tree_users[candidate_id]
+                for candidate_id in closest_ids_by_worker.get(worker_id, [])
+            ]
+            for worker_id in worker_ids
+        }
+        return known_entries_by_worker, closest_entries_by_worker
+
+    def closest_ids_from_known_ids(self, known_ids_by_worker):
+        return {
+            worker_id: self.ranked_worker_ids_for_owner(
+                worker_id,
+                sorted(known_ids),
+                limit=ROUTING_TREE_CLOSEST_USERS,
+            )
+            for worker_id, known_ids in known_ids_by_worker.items()
+        }
+
+    def ranked_worker_ids_for_owner(self, worker_id: str, candidate_ids, limit: int):
+        scored = []
+        for candidate_id in candidate_ids:
+            if candidate_id == worker_id:
+                continue
+            if candidate_id not in self.joined_tree_users:
+                continue
+            scored.append((self.user_similarity(worker_id, candidate_id), candidate_id))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        ranked_ids = [candidate_id for _, candidate_id in scored]
+        if limit and limit > 0:
+            return ranked_ids[:limit]
+        return ranked_ids
+
+    def stable_worker_index(self, worker_id: str):
+        if worker_id.startswith("node") and worker_id[4:].isdigit():
+            return int(worker_id[4:])
+        return sum(ord(char) for char in worker_id)
+
+    def user_similarity(self, worker_id: str, candidate_id: str):
+        owner_entry = self.joined_tree_users.get(worker_id)
+        candidate_entry = self.joined_tree_users.get(candidate_id)
+        if owner_entry is None or candidate_entry is None:
+            return float("-inf")
+        return cosine_similarity(owner_entry["embedding"], candidate_entry["embedding"])
+
+    def best_candidate_for_owner(self, worker_id: str, candidate_ids):
+        ranked = self.ranked_worker_ids_for_owner(worker_id, candidate_ids, limit=1)
+        return ranked[0] if ranked else ""
+
+    def closest_acceptance_score(self, worker_id: str, closest_ids: list[str]):
+        if not closest_ids:
+            return float("-inf")
+        if len(closest_ids) >= 50:
+            threshold_id = closest_ids[49]
+        else:
+            threshold_id = closest_ids[-1]
+        return self.user_similarity(worker_id, threshold_id)
 
     def user_embedding_record_from_entry(self, entry):
         return rag_pb2.UserEmbeddingRecord(
@@ -2110,13 +2351,18 @@ async def serve():
         )
 
     if is_leader:
-        await servicer.handle_routing_tree_join(
-            servicer.build_routing_tree_join_request(),
-            servicer.routing_tree_root_node_id,
-        )
+        await servicer.rebuild_routing_tree_as_leader(reason="startup_leader")
 
     effective_init_addr = addr_for_worker_id(elected_leader_id)
     start_routing_startup_tasks(servicer, effective_init_addr)
+    if not FORCE_LEADER_ID:
+        asyncio.create_task(
+            monitor_leader_changes(
+                servicer,
+                initial_leader_id=elected_leader_id,
+                initial_is_leader=is_leader,
+            )
+        )
     if BOOTSTRAP_QUERY and (BOOTSTRAP_DELAY_SECONDS > 0.0):
         asyncio.create_task(inject_bootstrap_query(servicer))
     await server.wait_for_termination()
@@ -2130,6 +2376,69 @@ def start_routing_startup_tasks(servicer: RagWorkerServicer, init_addr: str = IN
         flush=True,
     )
     asyncio.create_task(join_routing_tree(servicer, init_addr))
+
+
+async def monitor_leader_changes(
+    servicer: RagWorkerServicer,
+    initial_leader_id: str | None,
+    initial_is_leader: bool,
+):
+    last_leader_id = initial_leader_id
+    last_is_leader = initial_is_leader
+    print(
+        f"[rag-worker {WORKER_ID}] leader monitor started "
+        f"leader={last_leader_id} is_leader={last_is_leader} "
+        f"interval={LEADER_MONITOR_SECONDS}s",
+        flush=True,
+    )
+    while True:
+        await asyncio.sleep(LEADER_MONITOR_SECONDS)
+        if leader_election is None:
+            continue
+
+        current_leader_id = leader_election.get_leader_id()
+        current_is_leader = leader_election.is_leader()
+        if not current_leader_id:
+            continue
+
+        leader_changed = current_leader_id != last_leader_id
+        became_leader = current_is_leader and not last_is_leader
+        lost_leader = last_is_leader and not current_is_leader
+
+        if not (leader_changed or became_leader or lost_leader):
+            last_leader_id = current_leader_id
+            last_is_leader = current_is_leader
+            continue
+
+        current_leader_addr = addr_for_worker_id(current_leader_id)
+        print(
+            f"[rag-worker {WORKER_ID}] leader change observed "
+            f"previous={last_leader_id} current={current_leader_id} "
+            f"was_leader={last_is_leader} is_leader={current_is_leader}",
+            flush=True,
+        )
+        benchmark_events.emit(
+            "leader_change_observed",
+            previous_leader_id=last_leader_id or "",
+            current_leader_id=current_leader_id,
+            was_leader=last_is_leader,
+            is_leader=current_is_leader,
+        )
+
+        if current_is_leader:
+            await servicer.rebuild_routing_tree_as_leader(
+                reason=f"leader_change:{last_leader_id}->{current_leader_id}"
+            )
+        else:
+            servicer.prepare_for_routing_tree_rejoin(
+                reason=f"leader_change:{last_leader_id}->{current_leader_id}",
+                leader_id=current_leader_id,
+                leader_addr=current_leader_addr,
+            )
+            asyncio.create_task(join_routing_tree(servicer, current_leader_addr))
+
+        last_leader_id = current_leader_id
+        last_is_leader = current_is_leader
 
 
 async def join_routing_tree(servicer: RagWorkerServicer, init_addr: str = INIT_ADDR):
@@ -2166,10 +2475,23 @@ async def join_routing_tree(servicer: RagWorkerServicer, init_addr: str = INIT_A
                 f"closest_users={len(reply.closest_users)} attempt={attempt}",
                 flush=True,
             )
+            benchmark_events.emit(
+                "routing_tree_joined",
+                root_worker_id=reply.root_worker_id,
+                root_addr=init_addr,
+                joined_count=reply.joined_count,
+                expected_count=reply.expected_count,
+                routing_epoch=reply.routing_epoch,
+                tree_node_id=reply.tree_node_id,
+                custodian_worker_id=reply.custodian_worker_id,
+                custodian_addr=reply.custodian_addr or init_addr,
+                closest_user_count=len(reply.closest_users),
+                attempt=attempt,
+            )
             asyncio.create_task(
                 sync_routing_tree_closest_users(
                     servicer,
-                    servicer.assigned_routing_tree_custodian_addr,
+                    init_addr,
                 )
             )
             return
@@ -2197,20 +2519,29 @@ async def sync_routing_tree_closest_users(
     if servicer.is_root_custodian():
         return
 
+    desired_closest_users = min(
+        ROUTING_TREE_CLOSEST_USERS,
+        max(ROUTING_TREE_EXPECTED_USERS - 1, 0),
+    )
     for attempt in range(1, USER_EMBEDDING_SYNC_RETRY_ATTEMPTS + 1):
         ok = await servicer.sync_user_embedding_registry_once(target_addr=target_addr)
-        if ok and len(servicer.user_embedding_registry) > 1:
+        synced_closest_users = max(len(servicer.user_embedding_registry) - 1, 0)
+        if ok and (
+            desired_closest_users == 0
+            or synced_closest_users >= desired_closest_users
+        ):
             print(
                 f"[rag-worker {WORKER_ID}] synced routing-tree closest-users "
-                f"from={target_addr} count={len(servicer.user_embedding_registry) - 1} "
-                f"attempt={attempt}",
+                f"from={target_addr} count={synced_closest_users} "
+                f"desired={desired_closest_users} attempt={attempt}",
                 flush=True,
             )
             return
         if attempt == USER_EMBEDDING_SYNC_RETRY_ATTEMPTS:
             print(
                 f"[rag-worker {WORKER_ID}] routing-tree closest-users sync timed out "
-                f"target_addr={target_addr} attempts={attempt}",
+                f"target_addr={target_addr} count={synced_closest_users} "
+                f"desired={desired_closest_users} attempts={attempt}",
                 flush=True,
             )
             return

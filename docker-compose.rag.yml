@@ -19,8 +19,12 @@ services:
       HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node2:9100,node3:9100,node4:9100
       RAG_FORCE_LEADER_ID: ${RAG_FORCE_LEADER_ID:-node1}
-      RAG_BOOTSTRAP_QUERY: ${RAG_QUERY:-How many shares of did they repurchase during 2025?}
+      RAG_BENCHMARK_EVENTS_PATH: /app/benchmarking/events/node1.jsonl
+      RAG_BOOTSTRAP_QUERY: ${RAG_QUERY:- What are the dates for the MURAL Festival in Lisbon, and who is the curator?}
       RAG_BOOTSTRAP_DELAY_SECONDS: ${RAG_BOOTSTRAP_DELAY_SECONDS:-2.0}
+      # What are the dates for the MURAL Festival in Lisbon, and who is the curator?
+      # What significant event marked the rise of digital art platforms post-September 2023
+      #How many shares of Apple did they repurchase during 2025
 
   node2:
     build: .
@@ -41,6 +45,7 @@ services:
       HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node1:9100,node3:9100,node4:9100
       RAG_FORCE_LEADER_ID: ${RAG_FORCE_LEADER_ID:-node1}
+      RAG_BENCHMARK_EVENTS_PATH: /app/benchmarking/events/node2.jsonl
 
   node3:
     build: .
@@ -61,6 +66,7 @@ services:
       HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node1:9100,node2:9100,node4:9100
       RAG_FORCE_LEADER_ID: ${RAG_FORCE_LEADER_ID:-node1}
+      RAG_BENCHMARK_EVENTS_PATH: /app/benchmarking/events/node3.jsonl
 
   node4:
     build: .
@@ -81,3 +87,4 @@ services:
       HF_HOME: /root/.cache/huggingface
       RAG_NEIGHBORS: node1:9100,node2:9100,node3:9100
       RAG_FORCE_LEADER_ID: ${RAG_FORCE_LEADER_ID:-node1}
+      RAG_BENCHMARK_EVENTS_PATH: /app/benchmarking/events/node4.jsonl
