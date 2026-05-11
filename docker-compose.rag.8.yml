@@ -1,0 +1,128 @@
+services:
+  node1:
+    environment:
+      RAG_FORCE_LEADER_ID: ""
+      RAG_ROUTING_TREE_EXPECTED_USERS: "8"
+      RAG_LEASE_DURATION_SECONDS: "${RAG_LEASE_DURATION_SECONDS:-15}"
+      RAG_LEADER_MONITOR_SECONDS: "${RAG_LEADER_MONITOR_SECONDS:-2}"
+      RAG_NEIGHBORS: node2:9100,node3:9100,node4:9100,node5:9100,node6:9100,node7:9100,node8:9100
+
+  node2:
+    environment:
+      RAG_FORCE_LEADER_ID: ""
+      RAG_ROUTING_TREE_EXPECTED_USERS: "8"
+      RAG_LEASE_DURATION_SECONDS: "${RAG_LEASE_DURATION_SECONDS:-15}"
+      RAG_LEADER_MONITOR_SECONDS: "${RAG_LEADER_MONITOR_SECONDS:-2}"
+      RAG_NEIGHBORS: node1:9100,node3:9100,node4:9100,node5:9100,node6:9100,node7:9100,node8:9100
+
+  node3:
+    environment:
+      RAG_FORCE_LEADER_ID: ""
+      RAG_ROUTING_TREE_EXPECTED_USERS: "8"
+      RAG_LEASE_DURATION_SECONDS: "${RAG_LEASE_DURATION_SECONDS:-15}"
+      RAG_LEADER_MONITOR_SECONDS: "${RAG_LEADER_MONITOR_SECONDS:-2}"
+      RAG_NEIGHBORS: node1:9100,node2:9100,node4:9100,node5:9100,node6:9100,node7:9100,node8:9100
+
+  node4:
+    environment:
+      RAG_FORCE_LEADER_ID: ""
+      RAG_ROUTING_TREE_EXPECTED_USERS: "8"
+      RAG_LEASE_DURATION_SECONDS: "${RAG_LEASE_DURATION_SECONDS:-15}"
+      RAG_LEADER_MONITOR_SECONDS: "${RAG_LEADER_MONITOR_SECONDS:-2}"
+      RAG_NEIGHBORS: node1:9100,node2:9100,node3:9100,node5:9100,node6:9100,node7:9100,node8:9100
+
+  node5:
+    build: .
+    env_file:
+      - .env
+    container_name: rag-node5
+    volumes:
+      - .:/app
+      - ./rag_docs/node5:/data/rag
+      - ./hf_cache/node5:/root/.cache/huggingface
+    ports:
+      - "9105:9100"
+    environment:
+      ROLE: rag_worker
+      RAG_WORKER_ID: node5
+      RAG_PORT: 9100
+      RAG_DOC_DIR: /data/rag
+      HF_HOME: /root/.cache/huggingface
+      RAG_NEIGHBORS: node1:9100,node2:9100,node3:9100,node4:9100,node6:9100,node7:9100,node8:9100
+      RAG_FORCE_LEADER_ID: ""
+      RAG_ROUTING_TREE_EXPECTED_USERS: "8"
+      RAG_LEASE_DURATION_SECONDS: "${RAG_LEASE_DURATION_SECONDS:-15}"
+      RAG_LEADER_MONITOR_SECONDS: "${RAG_LEADER_MONITOR_SECONDS:-2}"
+      RAG_BENCHMARK_EVENTS_PATH: /app/benchmarking/events/node5.jsonl
+
+  node6:
+    build: .
+    env_file:
+      - .env
+    container_name: rag-node6
+    volumes:
+      - .:/app
+      - ./rag_docs/node6:/data/rag
+      - ./hf_cache/node6:/root/.cache/huggingface
+    ports:
+      - "9106:9100"
+    environment:
+      ROLE: rag_worker
+      RAG_WORKER_ID: node6
+      RAG_PORT: 9100
+      RAG_DOC_DIR: /data/rag
+      HF_HOME: /root/.cache/huggingface
+      RAG_NEIGHBORS: node1:9100,node2:9100,node3:9100,node4:9100,node5:9100,node7:9100,node8:9100
+      RAG_FORCE_LEADER_ID: ""
+      RAG_ROUTING_TREE_EXPECTED_USERS: "8"
+      RAG_LEASE_DURATION_SECONDS: "${RAG_LEASE_DURATION_SECONDS:-15}"
+      RAG_LEADER_MONITOR_SECONDS: "${RAG_LEADER_MONITOR_SECONDS:-2}"
+      RAG_BENCHMARK_EVENTS_PATH: /app/benchmarking/events/node6.jsonl
+
+  node7:
+    build: .
+    env_file:
+      - .env
+    container_name: rag-node7
+    volumes:
+      - .:/app
+      - ./rag_docs/node7:/data/rag
+      - ./hf_cache/node7:/root/.cache/huggingface
+    ports:
+      - "9107:9100"
+    environment:
+      ROLE: rag_worker
+      RAG_WORKER_ID: node7
+      RAG_PORT: 9100
+      RAG_DOC_DIR: /data/rag
+      HF_HOME: /root/.cache/huggingface
+      RAG_NEIGHBORS: node1:9100,node2:9100,node3:9100,node4:9100,node5:9100,node6:9100,node8:9100
+      RAG_FORCE_LEADER_ID: ""
+      RAG_ROUTING_TREE_EXPECTED_USERS: "8"
+      RAG_LEASE_DURATION_SECONDS: "${RAG_LEASE_DURATION_SECONDS:-15}"
+      RAG_LEADER_MONITOR_SECONDS: "${RAG_LEADER_MONITOR_SECONDS:-2}"
+      RAG_BENCHMARK_EVENTS_PATH: /app/benchmarking/events/node7.jsonl
+
+  node8:
+    build: .
+    env_file:
+      - .env
+    container_name: rag-node8
+    volumes:
+      - .:/app
+      - ./rag_docs/node8:/data/rag
+      - ./hf_cache/node8:/root/.cache/huggingface
+    ports:
+      - "9108:9100"
+    environment:
+      ROLE: rag_worker
+      RAG_WORKER_ID: node8
+      RAG_PORT: 9100
+      RAG_DOC_DIR: /data/rag
+      HF_HOME: /root/.cache/huggingface
+      RAG_NEIGHBORS: node1:9100,node2:9100,node3:9100,node4:9100,node5:9100,node6:9100,node7:9100
+      RAG_FORCE_LEADER_ID: ""
+      RAG_ROUTING_TREE_EXPECTED_USERS: "8"
+      RAG_LEASE_DURATION_SECONDS: "${RAG_LEASE_DURATION_SECONDS:-15}"
+      RAG_LEADER_MONITOR_SECONDS: "${RAG_LEADER_MONITOR_SECONDS:-2}"
+      RAG_BENCHMARK_EVENTS_PATH: /app/benchmarking/events/node8.jsonl
