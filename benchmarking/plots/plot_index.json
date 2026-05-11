@@ -1,0 +1,77 @@
+[
+  {
+    "description": "Fraction of attempts with evidence returned, grouped by benchmark topic.",
+    "file": "benchmarking/plots/retrieval_success_by_topic.png",
+    "name": "retrieval_success_by_topic"
+  },
+  {
+    "description": "Distribution of end-to-end latency from query dispatch to final answer.",
+    "file": "benchmarking/plots/latency_distribution.png",
+    "name": "latency_distribution"
+  },
+  {
+    "description": "End-to-end latency split by whether the route returned evidence.",
+    "file": "benchmarking/plots/latency_by_retrieval_outcome.png",
+    "name": "latency_by_retrieval_outcome"
+  },
+  {
+    "description": "How many chain-hop steps were observed per attempt.",
+    "file": "benchmarking/plots/hop_count_distribution.png",
+    "name": "hop_count_distribution"
+  },
+  {
+    "description": "Evidence-return success rate grouped by observed hop count.",
+    "file": "benchmarking/plots/success_by_hop_count.png",
+    "name": "success_by_hop_count"
+  },
+  {
+    "description": "Evidence success rate by number of contacted nodes, with attempt counts.",
+    "file": "benchmarking/plots/success_by_nodes_contacted.png",
+    "name": "success_by_nodes_contacted"
+  },
+  {
+    "description": "Modeled no-wait end-to-end query latency from average PageIndex call latency, average hop count, and final summary latency.",
+    "file": "benchmarking/plots/pageindex_call_latency_distribution.png",
+    "name": "pageindex_call_latency_distribution"
+  },
+  {
+    "description": "Relationship between number of PageIndex probes and final-answer latency.",
+    "file": "benchmarking/plots/pageindex_calls_vs_latency.png",
+    "name": "pageindex_calls_vs_latency"
+  },
+  {
+    "description": "Evidence success rate conditioned on whether the known source worker was contacted.",
+    "file": "benchmarking/plots/success_by_source_reached.png",
+    "name": "success_by_source_reached"
+  },
+  {
+    "description": "Cosine similarity distribution for each document embedding strategy.",
+    "file": "benchmarking/plots/embedding_similarity_boxplot.png",
+    "name": "embedding_similarity_boxplot"
+  },
+  {
+    "description": "Cosine deltas between PageIndex-derived embeddings and baselines.",
+    "file": "benchmarking/plots/embedding_delta_boxplot.png",
+    "name": "embedding_delta_boxplot"
+  },
+  {
+    "description": "Count of queries where each embedding strategy had the highest cosine similarity.",
+    "file": "benchmarking/plots/embedding_best_strategy_counts.png",
+    "name": "embedding_best_strategy_counts"
+  },
+  {
+    "description": "Mean query-to-document cosine similarity split by RepliQA vs FinanceBench.",
+    "file": "benchmarking/plots/embedding_similarity_by_dataset_source.png",
+    "name": "embedding_similarity_by_dataset_source"
+  },
+  {
+    "description": "Whether PageIndex averaging helps more on longer documents.",
+    "file": "benchmarking/plots/page_count_vs_pageindex_advantage.png",
+    "name": "page_count_vs_pageindex_advantage"
+  },
+  {
+    "description": "Average change in query similarity from depth weighting, grouped by tree depth.",
+    "file": "benchmarking/plots/depth_weighting_effect_by_tree_depth.png",
+    "name": "depth_weighting_effect_by_tree_depth"
+  }
+]
